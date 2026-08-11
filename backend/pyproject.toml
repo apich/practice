@@ -1,0 +1,37 @@
+[project]
+name = "agent-platform"
+version = "0.1.0"
+description = "Agent Platform - A dual-role agent development platform based on AgentScope."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    # AgentScope core + service extras (FastAPI, uvicorn, apscheduler, ag-ui)
+    "agentscope[service]>=2.0.6",
+    # Redis storage backend
+    "agentscope[storage-redis]>=2.0.6",
+    # Qdrant vector store for knowledge base
+    "agentscope[vdb-qdrant]>=2.0.6",
+    # Channel adapters (Feishu, Discord)
+    "agentscope[channel]>=2.0.6",
+    # Additional dependencies not in agentscope extras
+    "PyJWT>=2.8.0",
+    "passlib[bcrypt]>=1.7.4",
+    "shortuuid>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pre-commit",
+    "pytest",
+    "pytest-asyncio",
+]
+
+[tool.uv]
+index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+
+[build-system]
+requires = ["setuptools>=45"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = []
