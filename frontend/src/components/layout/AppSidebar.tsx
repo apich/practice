@@ -36,11 +36,11 @@ export function AppSidebar() {
 	const { startOnborda } = useOnborda();
 
 	const handleStartTour = () => {
-		if (!location.pathname.startsWith('/chat')) {
+		if (!location.pathname.startsWith('/admin/chat')) {
 			// Page not mounted yet — leave a flag, navigate, and let the
 			// ChatTourController auto-trigger after ChatPage mounts.
 			sessionStorage.setItem('force_tour', '1');
-			navigate('/chat');
+			navigate('/admin/chat');
 		} else {
 			startOnborda(CHAT_TOUR_NAME);
 		}
@@ -68,11 +68,11 @@ export function AppSidebar() {
 							<SidebarMenuItem key={'chat'}>
 								<SidebarMenuButton
 									tooltip={{ children: t('common.chat'), hidden: false }}
-									isActive={
-										location.pathname === '/chat' ||
-										location.pathname.startsWith('/chat/')
-									}
-									onClick={() => navigate('/chat')}
+							isActive={
+								location.pathname === '/admin/chat' ||
+								location.pathname.startsWith('/admin/chat/')
+							}
+							onClick={() => navigate('/admin/chat')}
 									className="justify-center"
 								>
 									<BotMessageSquare />
@@ -81,8 +81,8 @@ export function AppSidebar() {
 							<SidebarMenuItem>
 								<SidebarMenuButton
 									tooltip={{ children: t('common.schedule'), hidden: false }}
-									isActive={location.pathname === '/schedule'}
-									onClick={() => navigate('/schedule')}
+							isActive={location.pathname === '/admin/schedule'}
+							onClick={() => navigate('/admin/schedule')}
 									className="justify-center"
 								>
 									<Calendars />
@@ -91,8 +91,8 @@ export function AppSidebar() {
 							<SidebarMenuItem>
 								<SidebarMenuButton
 									tooltip={{ children: t('common.channel'), hidden: false }}
-									isActive={location.pathname === '/channel'}
-									onClick={() => navigate('/channel')}
+							isActive={location.pathname === '/admin/channel'}
+							onClick={() => navigate('/admin/channel')}
 									className="px-2"
 								>
 									<Cable />
@@ -107,8 +107,8 @@ export function AppSidebar() {
 							<SidebarMenuItem>
 								<SidebarMenuButton
 									tooltip={{ children: t('common.credential'), hidden: false }}
-									isActive={location.pathname === '/credential'}
-									onClick={() => navigate('/credential')}
+							isActive={location.pathname === '/admin/credential'}
+							onClick={() => navigate('/admin/credential')}
 									className="justify-center"
 								>
 									<KeyRound />
@@ -118,8 +118,8 @@ export function AppSidebar() {
 								<SidebarMenuButton
 									tooltip={{ children: t('common.mcp-hub'), hidden: false }}
 									// Stays lit while browsing a hub under /mcp/:hubId.
-									isActive={location.pathname.startsWith('/mcp')}
-									onClick={() => navigate('/mcp')}
+							isActive={location.pathname.startsWith('/admin/mcp')}
+							onClick={() => navigate('/admin/mcp')}
 									className="justify-center"
 								>
 									<MCPSvg />
@@ -128,8 +128,8 @@ export function AppSidebar() {
 							<SidebarMenuItem>
 								<SidebarMenuButton
 									tooltip={{ children: t('common.skill-hub'), hidden: false }}
-									isActive={location.pathname.startsWith('/skill')}
-									onClick={() => navigate('/skill')}
+							isActive={location.pathname.startsWith('/admin/skill')}
+							onClick={() => navigate('/admin/skill')}
 									className="justify-center"
 								>
 									<BookText />
@@ -138,8 +138,8 @@ export function AppSidebar() {
 							<SidebarMenuItem>
 								<SidebarMenuButton
 									tooltip={{ children: t('common.knowledge'), hidden: false }}
-									isActive={location.pathname === '/knowledge'}
-									onClick={() => navigate('/knowledge')}
+							isActive={location.pathname === '/admin/knowledge'}
+							onClick={() => navigate('/admin/knowledge')}
 									className="justify-center"
 								>
 									<LibraryBig />
@@ -177,8 +177,8 @@ export function AppSidebar() {
 					<SidebarMenuItem>
 						<SidebarMenuButton
 							tooltip={{ children: t('common.settings'), hidden: false }}
-							isActive={location.pathname === '/setup'}
-							onClick={() => navigate('/setup')}
+							isActive={location.pathname === '/profile'}
+							onClick={() => navigate('/profile')}
 							className="justify-center"
 						>
 							<UserRound />

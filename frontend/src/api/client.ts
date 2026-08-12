@@ -1,7 +1,20 @@
 import { toast } from 'sonner';
 
-export const getBaseUrl = () => localStorage.getItem('server_url') ?? '';
 export const getUserId = () => localStorage.getItem('username') ?? '';
+
+// ── JWT token helpers ──────────────────────────────────────────────────────
+export const getAccessToken = () => localStorage.getItem('access_token') ?? '';
+export const isAuthenticated = () => !!localStorage.getItem('access_token');
+
+/** Clear all auth state and redirect to /login (if not already there). */
+export function clearAuthAndRedirect() {
+	localStorage.removeItem('access_token');
+	localStorage.removeItem('refresh_token');
+	localStorage.removeItem('user_info');
+	if (window.location.pathname !== '/login') {
+		window.location.href = '/login';
+	}
+}
 
 /**
  * Structured error thrown for non-2xx HTTP responses.
@@ -26,19 +39,33 @@ interface RequestOptions {
 	/** When true, suppresses the automatic error toast. Useful when the caller shows its own inline error UI. */
 	silent?: boolean;
 	signal?: AbortSignal;
-	/** Overrides the stored server URL. Lets the setup page probe an address before persisting it. */
-	baseUrl?: string;
-	/** Overrides the stored username, for the same reason as `baseUrl`. */
-	userId?: string;
 	/** Gives up after this many ms and reports {@link TIMEOUT_STATUS}. Off by default — a streaming chat is meant to stay open. */
 	timeoutMs?: number;
+	/** Skip Authorization / X-User-ID headers (e.g. health probes that don't need auth). */
+	skipAuth?: boolean;
 }
 
 /** Reported when `timeoutMs` elapses. Real 408s come from a server, so either way the request did not complete in time. */
 export const TIMEOUT_STATUS = 408;
 
-function buildHeaders(hasBody: boolean, userId?: string): Record<string, string> {
-	const headers: Record<string, string> = { 'X-User-ID': userId ?? getUserId() };
+function buildHeaders(hasBody: boolean, skipAuth?: boolean): Record<string, string> {
+	const headers: Record<string, string> = {};
+
+	if (skipAuth) {
+		if (hasBody) headers['Content-Type'] = 'application/json';
+		return headers;
+	}
+
+	// JWT takes precedence; fall back to X-User-ID for dev-mode / backward compat
+	const token = getAccessToken();
+	if (token) {
+		headers['Authorization'] = `Bearer ${token}`;
+	}
+	const uid = getUserId();
+	if (uid) {
+		headers['X-User-ID'] = uid;
+	}
+
 	if (hasBody) headers['Content-Type'] = 'application/json';
 	return headers;
 }
@@ -63,11 +90,9 @@ async function streamRequest(path: string, options: RequestOptions = {}): Promis
 		params,
 		signal,
 		silent = false,
-		baseUrl,
-		userId,
 		timeoutMs,
 	} = options;
-	const url = new URL(path, baseUrl ?? getBaseUrl());
+	const url = new URL(path, window.location.origin);
 	if (params) {
 		Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
 	}
@@ -82,7 +107,7 @@ async function streamRequest(path: string, options: RequestOptions = {}): Promis
 	try {
 		res = await fetch(url.toString(), {
 			method,
-			headers: buildHeaders(body !== undefined, userId),
+			headers: buildHeaders(body !== undefined, options?.skipAuth),
 			body: body ? JSON.stringify(body) : undefined,
 			signal: combined,
 		});
@@ -108,6 +133,13 @@ async function streamRequest(path: string, options: RequestOptions = {}): Promis
 	if (!res.ok) {
 		const detail = await extractErrorDetail(res);
 		const error = new ApiError(res.status, detail);
+
+		// 401 → token expired or invalid. Clear auth state and redirect to login.
+		// Skip for /auth/ endpoints (login/refresh) so the caller can handle it.
+		if (res.status === 401 && !path.startsWith('/auth/')) {
+			clearAuthAndRedirect();
+		}
+
 		if (!silent) toast.error(detail);
 		throw error;
 	}
@@ -125,7 +157,7 @@ export const client = {
 	get: <T>(
 		path: string,
 		params?: Record<string, string>,
-		options?: { silent?: boolean; baseUrl?: string; userId?: string; timeoutMs?: number },
+		options?: { silent?: boolean; timeoutMs?: number; skipAuth?: boolean },
 	) => request<T>(path, { method: 'GET', params, ...options }),
 	post: <T>(
 		path: string,

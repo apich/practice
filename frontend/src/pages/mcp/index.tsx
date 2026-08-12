@@ -525,7 +525,7 @@ export function MCPHubPage() {
 								<SidebarMenuItem>
 									<SidebarMenuButton
 										isActive={!hubId}
-										onClick={() => navigate('/mcp')}
+										onClick={() => navigate('/admin/mcp')}
 									>
 										<Plug />
 										<span className="min-w-0 flex-1 truncate">
@@ -592,7 +592,7 @@ export function MCPHubPage() {
 										<SidebarMenuItem key={hub.hub_id}>
 											<SidebarMenuButton
 												isActive={hubId === hub.hub_id}
-												onClick={() => navigate(`/mcp/${hub.hub_id}`)}
+												onClick={() => navigate(`/admin/mcp/${hub.hub_id}`)}
 												title={hub.description}
 											>
 												<Avatar className="size-4 rounded-sm">

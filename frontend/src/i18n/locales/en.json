@@ -481,21 +481,18 @@
 		"ttsParametersDescription": "Adjust parameters for the selected TTS model.",
 		"noTts": "No TTS"
 	},
-	"setup": {
-		"title": "Connect to Service",
-		"description": "Enter your server URL and username to get started.",
-		"serverUrl": "Server URL",
-		"serverUrlPlaceholder": "https://...",
+	"login": {
+		"title": "Agent Platform",
+		"subtitle": "Sign in to your account",
 		"username": "Username",
-		"usernamePlaceholder": "Your username",
-		"submit": "Get Started",
-		"checking": "Connecting...",
-		"errorUnreachable": "Cannot reach this server. Check the address, make sure the service is running, and that it allows cross-origin requests.",
-		"errorTimeout": "The server accepted the connection but did not respond in time. It may be overloaded or stuck starting up.",
-		"errorNotAgentScope": "Reached the address, but it is not an AgentScope service — check the URL, or upgrade a backend too old to expose a health endpoint.",
-		"errorUnauthorized": "The server rejected this username. Enter a valid one.",
-		"errorNotReady": "The server is reachable but not ready. These subsystems failed to start:",
-		"hint": "This is a frontend-only application, and all data are served from the Server URL above. The username is used solely for server-side authentication."
+		"usernamePlaceholder": "Enter username",
+		"password": "Password",
+		"passwordPlaceholder": "Enter password",
+		"submit": "Sign in",
+		"loggingIn": "Signing in...",
+		"errorInvalidCredentials": "Invalid username or password",
+		"errorNetwork": "Cannot connect to server, please check your network",
+		"hint": "Default admin account: admin / admin"
 	},
 	"tour": {
 		"trigger": "Take a tour",
@@ -780,5 +777,14 @@
 		"empty": "This folder is empty",
 		"pressEnter": "Press Enter to check this path first",
 		"gitTooltip": "{{staged}} staged · {{unstaged}} modified · {{untracked}} untracked\nLine counts exclude untracked files"
+	},
+	"profile": {
+		"subtitle": "Profile Information",
+		"userId": "User ID",
+		"username": "Username",
+		"role": "Role",
+		"roleDeveloper": "Developer",
+		"roleEndUser": "End User",
+		"logout": "Log Out"
 	}
 }

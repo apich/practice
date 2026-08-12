@@ -1138,3 +1138,64 @@ export interface HealthResponse {
 	version: string;
 	components: Record<string, ComponentStatus>;
 }
+
+// ─── Auth ────────────────────────────────────────────────────────────────────
+
+export interface UserInfoResponse {
+	user_id: string;
+	username: string;
+	role: 'developer' | 'end_user' | string;
+	created_at: string | null;
+}
+
+// ─── Publish ─────────────────────────────────────────────────────────────────
+
+export interface PublishRequest {
+	/** Release notes / update description, required. */
+	release_notes: string;
+	/** Execution mode: free chat or structured task form. */
+	execution_mode: 'chat' | 'task';
+	/** JSON Schema for task mode input parameters. Required when execution_mode is 'task'. */
+	input_schema?: JSONSchema | null;
+}
+
+export interface PublishResponse {
+	/** Auto-generated short SHA256 hash version number, e.g. "a3f2c8d". */
+	version: string;
+	agent_id: string;
+	published_at: string;
+}
+
+export interface PublishedAgentDetail {
+	id: string;
+	agent_id: string;
+	agent_name: string;
+	agent_description: string;
+	published: boolean;
+	current_version: string;
+	execution_mode: 'chat' | 'task';
+	input_schema: JSONSchema | null;
+	published_at: string | null;
+	unpublished_at: string | null;
+	published_by: string;
+}
+
+export interface AgentVersion {
+	id: string;
+	version: string;
+	release_notes: string;
+	execution_mode: 'chat' | 'task';
+	published_by: string;
+	published_at: string;
+	is_current: boolean;
+}
+
+export interface AgentVersionDetail extends AgentVersion {
+	input_schema: JSONSchema | null;
+	agent_snapshot: Record<string, unknown>;
+}
+
+export interface ExecuteResponse {
+	session_id: string;
+	agent_id: string;
+}

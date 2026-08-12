@@ -498,7 +498,7 @@ export function SkillHubPage() {
 								<SidebarMenuItem>
 									<SidebarMenuButton
 										isActive={!hubId}
-										onClick={() => navigate('/skill')}
+										onClick={() => navigate('/admin/skill')}
 									>
 										<Plug />
 										<span className="min-w-0 flex-1 truncate">
@@ -565,7 +565,7 @@ export function SkillHubPage() {
 										<SidebarMenuItem key={hub.hub_id}>
 											<SidebarMenuButton
 												isActive={hubId === hub.hub_id}
-												onClick={() => navigate(`/skill/${hub.hub_id}`)}
+												onClick={() => navigate(`/admin/skill/${hub.hub_id}`)}
 												title={hub.description}
 											>
 												<Avatar className="size-4 rounded-sm">

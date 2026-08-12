@@ -481,21 +481,18 @@
 		"ttsParametersDescription": "调整所选语音合成模型的参数。",
 		"noTts": "不使用语音合成"
 	},
-	"setup": {
-		"title": "连接到服务器",
-		"description": "请输入服务器地址和用户名以开始使用。",
-		"serverUrl": "服务器地址",
-		"serverUrlPlaceholder": "https://...",
+	"login": {
+		"title": "智能体平台",
+		"subtitle": "登录到您的账户",
 		"username": "用户名",
 		"usernamePlaceholder": "请输入用户名",
-		"submit": "开始使用",
-		"checking": "连接中...",
-		"errorUnreachable": "无法连接到该服务器。请检查地址是否正确、服务是否已启动，以及是否允许跨域请求。",
-		"errorTimeout": "服务器已建立连接，但在超时时间内没有响应。可能负载过高或启动卡住了。",
-		"errorNotAgentScope": "地址可以访问，但它不是 AgentScope 服务。请检查地址，或升级尚未提供健康检查接口的旧版本后端。",
-		"errorUnauthorized": "服务器拒绝了该用户名，请填写有效的用户名。",
-		"errorNotReady": "服务器可以连接，但尚未就绪。以下子系统启动失败：",
-		"hint": "此应用仅提供前端服务，所有数据均来自填写的服务器地址，用户名仅用于服务端鉴权。"
+		"password": "密码",
+		"passwordPlaceholder": "请输入密码",
+		"submit": "登录",
+		"loggingIn": "登录中...",
+		"errorInvalidCredentials": "用户名或密码错误",
+		"errorNetwork": "无法连接到服务器，请检查网络连接",
+		"hint": "默认管理员账户：admin / admin"
 	},
 	"tour": {
 		"trigger": "新手引导",
@@ -780,5 +777,14 @@
 		"empty": "此文件夹为空",
 		"pressEnter": "先按回车校验该路径",
 		"gitTooltip": "{{staged}} 已暂存 · {{unstaged}} 已修改 · {{untracked}} 未跟踪\n行数不含未跟踪文件"
+	},
+	"profile": {
+		"subtitle": "个人信息",
+		"userId": "用户 ID",
+		"username": "用户名",
+		"role": "角色",
+		"roleDeveloper": "开发者",
+		"roleEndUser": "终端用户",
+		"logout": "退出登录"
 	}
 }

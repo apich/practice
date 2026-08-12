@@ -253,7 +253,7 @@ export function ChannelDetailPanel({
 										<TableRow
 											key={s.id}
 											className="group cursor-pointer"
-											onClick={() => navigate(`/chat/${s.agent_id}/${s.id}`)}
+											onClick={() => navigate(`/admin/chat/${s.agent_id}/${s.id}`)}
 											title={t('channel.sessions.openInChat')}
 										>
 											<TableCell className="max-w-0 truncate px-3 py-2 text-xs">

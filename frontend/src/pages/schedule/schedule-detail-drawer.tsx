@@ -175,7 +175,7 @@ export function ScheduleDetailDrawer({
 											className="flex flex-row justify-between text-xs px-2.5 py-2 font-mono rounded-md ring ring-border items-center cursor-pointer hover:bg-muted/50 transition-colors"
 											onClick={() => {
 												navigate(
-													`/chat/${schedule.agent_id}/${session.id}`,
+													`/admin/chat/${schedule.agent_id}/${session.id}`,
 												);
 												onOpenChange(false);
 											}}

@@ -4,10 +4,12 @@ import {
 	Cable,
 	CalendarClock,
 	Ellipsis,
+	History,
 	type LucideIcon,
 	MessageSquareDashed,
 	Pencil,
 	Plus,
+	Rocket,
 	Settings2,
 	Trash2,
 } from 'lucide-react';
@@ -19,6 +21,8 @@ import type { SessionRecord, SessionSource } from '@/api';
 import { AgentDialog } from '@/components/dialog/AgentDialog';
 import { DeleteDialog } from '@/components/dialog/DeleteDialog';
 import { EditAgentDialog } from '@/components/dialog/EditAgentDialog';
+import { PublishAgentDialog } from '@/components/dialog/PublishAgentDialog';
+import { VersionHistoryDialog } from '@/components/dialog/VersionHistoryDialog';
 import { RenameSessionDialog } from '@/components/dialog/RenameSessionDialog';
 import { AgentSelect } from '@/components/select/AgentSelect';
 import { ChatTourController } from '@/components/tour/ChatTourController';
@@ -107,6 +111,8 @@ const ChatPageInner = () => {
 	const { isMobile, setOpen, setOpenMobile } = useSidebar();
 	const [editOpen, setEditOpen] = useState(false);
 	const [deleteOpen, setDeleteOpen] = useState(false);
+	const [publishOpen, setPublishOpen] = useState(false);
+	const [versionHistoryOpen, setVersionHistoryOpen] = useState(false);
 	const [renameOpen, setRenameOpen] = useState(false);
 	const [renameSession, setRenameSession] = useState<SessionRecord | null>(null);
 	const [deleteSessionOpen, setDeleteSessionOpen] = useState(false);
@@ -138,7 +144,7 @@ const ChatPageInner = () => {
 	// the URL in-place (replace so we don't pollute history).
 	useEffect(() => {
 		if (!urlAgentId && agents.length > 0) {
-			navigate(`/chat/${agents[0].id}`, { replace: true });
+			navigate(`/admin/chat/${agents[0].id}`, { replace: true });
 		}
 	}, [agents, urlAgentId, navigate]);
 
@@ -148,7 +154,7 @@ const ChatPageInner = () => {
 		if (!urlAgentId || sessions.length === 0) return;
 		const matches = urlSessionId && sessions.some((v) => v.session.id === urlSessionId);
 		if (matches) return;
-		navigate(`/chat/${urlAgentId}/${sessions[0].session.id}`, { replace: true });
+		navigate(`/admin/chat/${urlAgentId}/${sessions[0].session.id}`, { replace: true });
 	}, [urlAgentId, urlSessionId, sessions, navigate]);
 
 	/**
@@ -173,11 +179,11 @@ const ChatPageInner = () => {
 				? { fallback_chat_model_config: seedConfig.fallback_chat_model_config }
 				: {}),
 		});
-		navigate(`/chat/${urlAgentId}/${res.session_id}`);
+		navigate(`/admin/chat/${urlAgentId}/${res.session_id}`);
 	};
 
 	const handleAgentDeleted = async () => {
-		navigate('/chat', { replace: true });
+		navigate('/admin/chat', { replace: true });
 		await refetchAgents();
 	};
 
@@ -187,7 +193,7 @@ const ChatPageInner = () => {
 		// back to the parent /chat/:agentId path; the redirect effect
 		// will then pick the next available session.
 		if (sessionId === urlSessionId && urlAgentId) {
-			navigate(`/chat/${urlAgentId}`, { replace: true });
+			navigate(`/admin/chat/${urlAgentId}`, { replace: true });
 		}
 	};
 
@@ -235,7 +241,7 @@ const ChatPageInner = () => {
 								className="flex-1 min-w-0"
 								agents={agents}
 								value={urlAgentId ?? null}
-								onChange={(id) => navigate(`/chat/${id}`)}
+								onChange={(id) => navigate(`/admin/chat/${id}`)}
 								variant="ghost"
 								size="default"
 							/>
@@ -253,11 +259,19 @@ const ChatPageInner = () => {
 								{/* w-auto: the default pins the menu to the
 								    trigger's width, which is a 32px icon button. */}
 								<DropdownMenuContent className="w-auto">
-									<DropdownMenuItem onClick={() => setEditOpen(true)}>
-										<Settings2 />
-										{t('agent-menu.settings')}
-									</DropdownMenuItem>
-									<DropdownMenuItem
+							<DropdownMenuItem onClick={() => setEditOpen(true)}>
+								<Settings2 />
+								{t('agent-menu.settings')}
+							</DropdownMenuItem>
+							<DropdownMenuItem onClick={() => setPublishOpen(true)}>
+								<Rocket />
+								发布
+							</DropdownMenuItem>
+							<DropdownMenuItem onClick={() => setVersionHistoryOpen(true)}>
+								<History />
+								版本历史
+							</DropdownMenuItem>
+							<DropdownMenuItem
 										onClick={() => setDeleteOpen(true)}
 										variant="destructive"
 									>
@@ -324,7 +338,7 @@ const ChatPageInner = () => {
 																	}
 																	onClick={() => {
 																		navigate(
-																			`/chat/${urlAgentId}/${session.id}`,
+																			`/admin/chat/${urlAgentId}/${session.id}`,
 																		);
 																		setOpenMobile(false);
 																	}}
@@ -414,7 +428,7 @@ const ChatPageInner = () => {
 																	}
 																	onClick={() => {
 																		navigate(
-																			`/chat/${urlAgentId}/${session.id}`,
+																			`/admin/chat/${urlAgentId}/${session.id}`,
 																		);
 																		setOpenMobile(false);
 																	}}
@@ -501,6 +515,18 @@ const ChatPageInner = () => {
 						onOpenChange={setEditOpen}
 						agent={selectedAgent}
 						onUpdated={refetchAgents}
+					/>
+				<PublishAgentDialog
+						open={publishOpen}
+						onOpenChange={setPublishOpen}
+						agentId={selectedAgent.id}
+						agentName={selectedAgent.data.name}
+					/>
+				<VersionHistoryDialog
+						open={versionHistoryOpen}
+						onOpenChange={setVersionHistoryOpen}
+						agentId={selectedAgent.id}
+						agentName={selectedAgent.data.name}
 					/>
 					<DeleteDialog
 						open={deleteOpen}

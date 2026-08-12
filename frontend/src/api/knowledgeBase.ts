@@ -1,4 +1,4 @@
-import { ApiError, client, getBaseUrl, getUserId } from './client';
+import { ApiError, client, getUserId } from './client';
 import type {
 	CreateKnowledgeBaseRequest,
 	CreateKnowledgeBaseResponse,
@@ -60,7 +60,7 @@ function uploadDocumentXhr(
 		}
 
 		const xhr = new XMLHttpRequest();
-		const url = new URL(`/knowledge_bases/${knowledgeBaseId}/documents`, getBaseUrl());
+		const url = new URL(`/knowledge_bases/${knowledgeBaseId}/documents`, window.location.origin);
 		xhr.open('POST', url.toString(), true);
 		xhr.setRequestHeader('X-User-ID', getUserId());
 

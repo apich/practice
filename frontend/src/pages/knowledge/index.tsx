@@ -120,7 +120,7 @@ export const KnowledgePage = () => {
 	const handleCreated = async (knowledgeBaseId: string) => {
 		await refetch();
 		setSelectedKbId(knowledgeBaseId);
-		navigate(`/knowledge/${knowledgeBaseId}`);
+		navigate(`/admin/knowledge/${knowledgeBaseId}`);
 	};
 
 	const handleConfirmDelete = async () => {
@@ -130,7 +130,7 @@ export const KnowledgePage = () => {
 		await refetch();
 		if (selectedKbId === id) {
 			setSelectedKbId(undefined);
-			navigate('/knowledge');
+			navigate('/admin/knowledge');
 		}
 	};
 
@@ -188,7 +188,7 @@ export const KnowledgePage = () => {
 													isActive={urlKbId === kb.id}
 													onClick={() => {
 														setSelectedKbId(kb.id);
-														navigate(`/knowledge/${kb.id}`);
+														navigate(`/admin/knowledge/${kb.id}`);
 													}}
 												>
 													<span className="min-w-0 flex-1 truncate">

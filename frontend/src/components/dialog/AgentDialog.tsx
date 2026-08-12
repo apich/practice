@@ -33,7 +33,7 @@ interface Props {
 export function AgentDialog({ onCreated, children }: Props) {
 	const { create } = useAgents();
 	const { t } = useTranslation();
-	const { schema } = useAgentSchema();
+	const { schema, error: schemaError } = useAgentSchema();
 	const [open, setOpen] = useState(false);
 	const [submitting, setSubmitting] = useState(false);
 	const [values, setValues] = useState<AgentFormValues | null>(null);
@@ -48,6 +48,13 @@ export function AgentDialog({ onCreated, children }: Props) {
 			setErrorMsg('');
 		}
 	}, [open, schema, values]);
+
+	// Show schema load error
+	useEffect(() => {
+		if (schemaError) {
+			setErrorMsg(`Failed to load agent schema: ${schemaError.message}`);
+		}
+	}, [schemaError]);
 
 	const handleChange = (section: AgentSection, key: string, value: SchemaFormValue) => {
 		setErrorMsg('');
@@ -95,7 +102,7 @@ export function AgentDialog({ onCreated, children }: Props) {
 					</DialogDescription>
 				</DialogHeader>
 				<div className="no-scrollbar -mx-4 max-h-[75vh] overflow-y-auto px-4">
-					{schema && values ? (
+					{schemaError ? null : schema && values ? (
 						<AgentFormFields schema={schema} values={values} onChange={handleChange} />
 					) : (
 						<p className="text-muted-foreground text-sm">{t('common.loading')}</p>

@@ -59,12 +59,12 @@ export function TeamPanel({ team, currentSessionId }: TeamPanelProps) {
 
 	const goToLeader = () => {
 		if (!leaderAgentId) return;
-		navigate(`/chat/${leaderAgentId}/${leaderSessionId}`);
+		navigate(`/admin/chat/${leaderAgentId}/${leaderSessionId}`);
 	};
 
 	const goToMember = (memberAgentId: string) => {
 		if (!leaderAgentId) return;
-		navigate(`/chat/${leaderAgentId}/${leaderSessionId}/${memberAgentId}`);
+		navigate(`/admin/chat/${leaderAgentId}/${leaderSessionId}/${memberAgentId}`);
 	};
 
 	const renderRow = (
