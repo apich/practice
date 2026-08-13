@@ -7,7 +7,7 @@ directly from route handlers.
 import hashlib
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -113,7 +113,7 @@ async def publish_agent(
     agent_name = agent_data.get("name", agent_id)
     agent_description = agent_data.get("system_prompt", "")[:500]
 
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
     version = generate_version(agent_id, release_notes, now)
 
     # Snapshot the agent config for rollback
@@ -209,7 +209,7 @@ async def unpublish_agent(
         )
 
     publication.published = False
-    publication.unpublished_at = datetime.now(timezone.utc)
+    publication.unpublished_at = datetime.utcnow()
     await db.commit()
 
     return {"agent_id": agent_id, "published": False}
@@ -335,7 +335,7 @@ async def rollback_version(
     pub.current_version = target.version
     pub.execution_mode = target.execution_mode
     pub.input_schema = target.input_schema
-    pub.updated_at = datetime.now(timezone.utc)
+    pub.updated_at = datetime.utcnow()
 
     await db.commit()
 
