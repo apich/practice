@@ -3,7 +3,6 @@ import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import { publishApi } from '@/api/publish';
-import { sessionApi } from '@/api';
 import type { PublishedAgentDetail } from '@/api/types';
 import { SchemaForm, defaultValuesFromSchema, type SchemaFormValue } from '@/components/form/SchemaForm';
 import { Button } from '@/components/ui/button.tsx';
@@ -48,7 +47,7 @@ export function LaunchpadPage() {
 	const handleStartChat = async () => {
 		if (!agentId) return;
 		try {
-			const { session_id: sessionId } = await sessionApi.create({ agent_id: agentId });
+			const { session_id: sessionId } = await publishApi.startChat(agentId);
 			navigate(`/space/chat/${agentId}/${sessionId}`);
 		} catch {
 			// error handled by client

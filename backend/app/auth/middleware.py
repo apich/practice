@@ -1,19 +1,19 @@
-"""JWT authentication middleware.
+"""JWT 认证 + 角色访问控制中间件.
+
+合并了原 middleware.py（JWT 解码）和 access_control.py（RBAC 访问控制），
+两者都是 Starlette 中间件，且注册顺序有依赖关系（JWT 先于 RBAC）。
 
 Intercepts every request and, when an ``Authorization: Bearer <token>``
 header is present, decodes the JWT and:
 1. Stores the user payload on ``request.state.user`` (backward compat)
 2. Sets the ``AuthContext`` ContextVar for dependency injection
-3. Injects / overrides the ``X-User-ID`` header in the ASGI scope so that
-   agentscope's own endpoints — which read ``X-User-ID`` directly — see
-   the authenticated user's id.
+
+AgentScope endpoints use FastAPI's dependency_overrides to extract the
+user ID from request.state instead of relying on the X-User-ID header.
 
 When no Authorization header is present the request passes through
 unchanged, preserving backward compatibility with the dev-mode
 ``X-User-ID`` header used by the Setup page.
-
-Reference: agent-archetype's AuthMiddleware, adapted for agent-platform's
-hybrid auth model (JWT + dev-mode X-User-ID fallback).
 """
 
 from __future__ import annotations
@@ -22,9 +22,49 @@ from typing import Optional
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
+from starlette.responses import JSONResponse
 
-from app.auth.context import AuthContext, auth_context, set_auth_context
-from app.auth.security import decode_token, extract_bearer_token
+from app.auth.deps import AuthContext, auth_context, set_auth_context
+from app.auth.models import Role
+from app.auth.security import (
+    PermissionInfo,
+    TokenInfo,
+    decode_token,
+    extract_bearer_token,
+)
+
+
+# ── Path rules (access control) ──────────────────────────────────────────────
+# End users are blocked from any path starting with these prefixes.
+DEVELOPER_ONLY_PREFIXES: tuple[str, ...] = (
+    "/agent",          # create / update / delete agents
+    "/credential",     # credential management
+    "/mcp",            # MCP management
+    "/skill",          # skill management
+    "/knowledge",      # knowledge base management
+    "/knowledge_bases",
+    "/schedule",       # schedule management
+    "/channel",        # channel management
+    "/hub",            # resource hubs
+    "/embedding-model",
+    "/model",          # model listing / config
+    "/tts-model",
+    "/auth/register",  # user registration
+    "/publish/my",     # developer's own publications
+    "/publish/agent",  # POST publish
+    "/unpublish",      # unpublish
+)
+
+# Paths that are always public (no role check needed).
+PUBLIC_PATHS: frozenset[str] = frozenset({
+    "/",
+    "/health",
+    "/docs",
+    "/redoc",
+    "/openapi.json",
+    "/auth/token",
+    "/auth/refresh",
+})
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -48,9 +88,6 @@ class AuthMiddleware(BaseHTTPMiddleware):
             if payload and payload.get("type") == "access":
                 user_payload = payload
 
-                # Set AuthContext for dependency injection
-                from app.auth.security import PermissionInfo, TokenInfo
-
                 token_info = TokenInfo(
                     active=True,
                     user_id=str(payload.get("sub", "")),
@@ -73,22 +110,43 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # Store on request state for dependencies to read
         request.state.user = user_payload
 
-        # Inject X-User-ID into the ASGI scope so agentscope sees it.
-        # Headers in the scope are a list of (bytes, bytes) tuples.
-        if user_payload:
-            user_id = user_payload.get("sub", "")
-            scope = request.scope
-            existing_headers = scope.get("headers", [])
-            # Remove any existing x-user-id and append the JWT-derived one
-            filtered = [
-                (k, v) for k, v in existing_headers if k != b"x-user-id"
-            ]
-            filtered.append((b"x-user-id", user_id.encode("utf-8")))
-            scope["headers"] = filtered
-
         try:
             return await call_next(request)
         finally:
-            # Clean up ContextVar to prevent context leakage
             if ctx_token is not None:
                 auth_context.reset(ctx_token)
+
+
+class AccessControlMiddleware(BaseHTTPMiddleware):
+    """Block end_user accounts from developer-only endpoints.
+
+    Must be registered **after** ``AuthMiddleware`` in the middleware
+    stack so that ``request.state.user`` is already populated when this
+    middleware runs.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+
+        # Public paths — always pass through
+        if path in PUBLIC_PATHS:
+            return await call_next(request)
+
+        # Check if the user is authenticated via JWT
+        user_payload = getattr(request.state, "user", None)
+        if not user_payload:
+            return await call_next(request)
+
+        role = user_payload.get("role", "")
+        if role != Role.END_USER:
+            return await call_next(request)
+
+        # End user — check against developer-only prefixes
+        for prefix in DEVELOPER_ONLY_PREFIXES:
+            if path.startswith(prefix):
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "Insufficient permissions for this action"},
+                )
+
+        return await call_next(request)

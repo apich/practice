@@ -1,7 +1,10 @@
-"""异步 SQLAlchemy 引擎与会话工厂.
+"""异步 SQLAlchemy 引擎、会话工厂与 declarative base.
 
-基于 SQLAlchemy 2.0 异步 ORM，提供全局 AsyncEngine、AsyncSession 工厂
-和 FastAPI 依赖注入。
+基于 SQLAlchemy 2.0 异步 ORM，提供：
+- Base: 所有 ORM 模型的 declarative base
+- AsyncEngine / AsyncSession 工厂
+- FastAPI 依赖注入 (get_db)
+- 表创建 (create_tables)
 
 默认使用 SQLite（零配置开发），生产环境通过 DATABASE_URL 环境变量
 切换到 PostgreSQL（asyncpg 驱动）。
@@ -18,9 +21,21 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.orm import DeclarativeBase
+
+from app.core.config import get_settings
 
 if TYPE_CHECKING:
-    from app.config import Settings
+    from app.core.config import Settings
+
+
+# ===== Declarative Base =====
+
+
+class Base(DeclarativeBase):
+    """Declarative base for all ORM models in the platform."""
+
+    pass
 
 
 # ===== 全局引擎与会话工厂（延迟初始化）=====
@@ -70,7 +85,6 @@ def init_db(settings: Settings | None = None) -> async_sessionmaker[AsyncSession
     global _engine, _session_factory
 
     if settings is None:
-        from app.config import get_settings
         settings = get_settings()
 
     _engine = create_engine(settings)
@@ -150,8 +164,6 @@ async def create_tables() -> None:
     """
     from app.auth import models as _auth_models  # noqa: F401
     from app.publish import models as _publish_models  # noqa: F401
-
-    from app.db.base import Base
 
     async with get_engine().begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

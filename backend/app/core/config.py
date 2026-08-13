@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from functools import lru_cache
 import os
-from typing import Any, Literal
+from typing import Literal
 
-from pydantic import Field, computed_field
+from pydantic import computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     enable_register: bool = True
     # 是否在首次启动时自动创建默认 admin 账户
     seed_default_admin: bool = True
+    # 默认 admin 账户的用户名和密码（生产环境务必修改）
+    seed_admin_username: str = "admin"
+    seed_admin_password: str = "admin"  # noqa: S105
 
     # ===== OAuth2.0 =====
     # 当配置了 oauth_auth_server_url 时，login 端点会委托外部鉴权服务
@@ -82,12 +85,23 @@ class Settings(BaseSettings):
     model_api_base: str = "https://api.openai.com/v1"
     model_name: str = "gpt-4o"
 
+    # ===== 向量存储 (Qdrant) =====
+    # 默认 :memory: 表示内存模式（重启后数据丢失）
+    # 生产环境配置为持久化路径（如 ./qdrant_data）或远程地址（如 http://localhost:6333）
+    qdrant_location: str = ":memory:"
+
     # ===== 工作空间 =====
     workspace_basedir: str = ""
 
     # ===== 沙盒 =====
     # 后端选择: disabled | local | docker | k8s
     sandbox_backend: Literal["disabled", "local", "docker", "k8s"] = "local"
+
+    # ===== Redis =====
+    redis_host: str = "localhost"
+    redis_port: int = 6379
+    redis_db: int = 10
+    redis_password: str = ""
 
     # ===== 日志 =====
     log_level: str = "DEBUG"
@@ -118,7 +132,7 @@ class Settings(BaseSettings):
     def effective_workspace_basedir(self) -> str:
         """实际使用的工作空间根目录.
 
-        若 workspace_basedir 为空，回退到 app/ 下的 workspaces 目录。
+        若 workspace_basedir 为空，回退到 app/ 上的 workspaces 目录。
         """
         if self.workspace_basedir:
             return self.workspace_basedir
@@ -137,7 +151,6 @@ class Settings(BaseSettings):
         """
         if self.database_url:
             return self.database_url
-        import os
         return "sqlite+aiosqlite:///" + os.path.join(
             os.path.dirname(os.path.abspath(__file__)),
             "agent_platform.db",

@@ -15,9 +15,9 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import get_current_user, require_role
+from app.auth.deps import get_current_user, require_role
 from app.auth.models import Role, User
-from app.db.engine import get_db
+from app.core.database import get_db
 from app.publish import service
 
 router = APIRouter(prefix="/publish", tags=["publish"])
@@ -148,4 +148,25 @@ async def execute_task(
         agent_id=agent_id,
         user_id=user.user_id,
         params=body.input,
+    )
+
+
+@router.post("/{agent_id}/chat")
+async def start_chat(
+    agent_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Start a chat-mode session for a published agent.
+
+    Creates a new session and records the execution for audit / analytics.
+    Returns ``{session_id, agent_id}`` — the frontend then navigates to
+    the chat page.
+    """
+    return await service.start_chat(
+        db=db,
+        app=request.app,
+        agent_id=agent_id,
+        user_id=user.user_id,
     )

@@ -1,6 +1,7 @@
 import { useParams } from 'react-router-dom';
 
 import { ChatViewport } from '@/pages/chat/ChatViewport';
+import { SidebarProvider } from '@/components/ui/sidebar';
 
 /**
  * Space chat page — simplified chat for end users.
@@ -13,11 +14,13 @@ export function SpaceChatPage() {
 	const { agentId, sessionId } = useParams<{ agentId: string; sessionId?: string }>();
 
 	return (
-		<div className="h-screen">
-			<ChatViewport
-				agentId={agentId ?? null}
-				sessionId={sessionId ?? null}
-			/>
-		</div>
+		<SidebarProvider>
+			<div className="h-screen">
+				<ChatViewport
+					agentId={agentId ?? null}
+					sessionId={sessionId ?? null}
+				/>
+			</div>
+		</SidebarProvider>
 	);
 }

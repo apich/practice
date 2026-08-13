@@ -58,4 +58,8 @@ export const publishApi = {
 		client.post<ExecuteResponse>(`/publish/${agentId}/execute`, {
 			input: params,
 		}),
+
+	/** Start a chat-mode session for a published agent. */
+	startChat: (agentId: string) =>
+		client.post<ExecuteResponse>(`/publish/${agentId}/chat`),
 };

@@ -6,6 +6,7 @@ environment for the agent's tools.
 
 Requires the ``kubernetes`` Python client and a valid kubeconfig.
 """
+import asyncio
 import logging
 from typing import Optional
 
@@ -61,7 +62,6 @@ class K8sSandboxManager(SandboxManager):
             raise RuntimeError("Kubernetes client is not installed")
 
         from kubernetes import client as k8s_client
-        import asyncio
 
         cpu_req = self.resource_limits.get("cpu", DEFAULT_CPU_REQUEST)
         mem_req = self.resource_limits.get("memory", DEFAULT_MEMORY_REQUEST)
@@ -154,7 +154,6 @@ class K8sSandboxManager(SandboxManager):
             return
 
         from kubernetes import client as k8s_client
-        import asyncio
 
         instance = self._instances[session_id]
         pod_name = instance.pod_name or f"sandbox-{session_id}"

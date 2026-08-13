@@ -1,8 +1,9 @@
 """Agent publication and version models.
 
-Two tables:
+Three tables:
     agent_publications — one row per agent, tracks current publish state
     agent_versions     — one row per publish event, stores config snapshots
+    agent_executions   — one row per end-user execution, for audit / analytics
 """
 import uuid
 from datetime import datetime
@@ -11,7 +12,7 @@ from typing import Optional
 from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base
+from app.core.database import Base
 
 
 class AgentPublication(Base):
@@ -93,3 +94,37 @@ class AgentVersion(Base):
         DateTime, server_default=func.now(),
     )
     is_current: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class AgentExecution(Base):
+    """End-user execution record — one row per published-agent execution.
+
+    Covers both chat-mode and task-mode invocations.  Used for audit
+    trails and usage analytics.
+    """
+
+    __tablename__ = "agent_executions"
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+    )
+    agent_id: Mapped[str] = mapped_column(
+        String(100), index=True,
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(36), index=True,
+    )  # end-user who triggered the execution
+    session_id: Mapped[str] = mapped_column(
+        String(100),
+    )  # session created for this execution
+    execution_mode: Mapped[str] = mapped_column(
+        String(10), default="chat",
+    )  # "chat" | "task"
+    input_params: Mapped[Optional[dict]] = mapped_column(
+        JSON, nullable=True,
+    )  # the form parameters submitted by the user (task mode only)
+    executed_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(),
+    )

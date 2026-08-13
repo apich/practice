@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import DateTime, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base
+from app.core.database import Base
 
 
 class Role:

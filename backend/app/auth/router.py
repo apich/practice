@@ -21,11 +21,11 @@ Login flow:
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import get_current_user, require_role
+from app.auth.deps import get_current_user, require_role
 from app.auth.models import LoginUrlResponse, Role, User
 from app.auth.security import (
     create_access_token,
@@ -34,9 +34,9 @@ from app.auth.security import (
     hash_password,
     verify_password,
 )
-from app.auth.service import AuthService, get_auth_service
-from app.config import get_settings
-from app.db.engine import get_db
+from app.auth.service import get_auth_service
+from app.core.config import get_settings
+from app.core.database import get_db
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -73,9 +73,12 @@ class RegisterRequest(BaseModel):
     password: str = Field(min_length=1)
     role: str = Field(default=Role.END_USER)
 
-    def validate_role(self) -> None:
-        if self.role not in Role.ALL:
-            raise ValueError(f"Invalid role: {self.role}. Must be one of {Role.ALL}")
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, v: str) -> str:
+        if v not in Role.ALL:
+            raise ValueError(f"Invalid role: {v}. Must be one of {Role.ALL}")
+        return v
 
 
 # ── OAuth2.0 Authorization Code + PKCE ───────────────────────────────────────
@@ -320,8 +323,8 @@ async def create_default_admin(db: AsyncSession) -> None:
     if not settings.seed_default_admin:
         return
 
-    admin_username = "admin"
-    admin_password = "admin"
+    admin_username = settings.seed_admin_username
+    admin_password = settings.seed_admin_password
 
     result = await db.execute(
         select(User).where(User.username == admin_username),

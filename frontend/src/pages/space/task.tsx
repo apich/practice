@@ -2,6 +2,7 @@ import { ArrowLeft, RotateCcw } from 'lucide-react';
 import { useParams, useNavigate } from 'react-router-dom';
 
 import { Button } from '@/components/ui/button.tsx';
+import { SidebarProvider } from '@/components/ui/sidebar';
 import { ChatViewport } from '@/pages/chat/ChatViewport';
 
 /**
@@ -17,7 +18,8 @@ export function TaskResultPage() {
 	const navigate = useNavigate();
 
 	return (
-		<div className="h-screen flex flex-col">
+		<SidebarProvider>
+			<div className="h-screen flex flex-col">
 			{/* Action bar */}
 			<header className="flex items-center justify-between px-4 py-2 border-b bg-canvas">
 				<Button
@@ -45,6 +47,7 @@ export function TaskResultPage() {
 					sessionId={sessionId ?? null}
 				/>
 			</div>
-		</div>
+			</div>
+		</SidebarProvider>
 	);
 }

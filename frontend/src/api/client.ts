@@ -1,6 +1,30 @@
 import { toast } from 'sonner';
 
-export const getUserId = () => localStorage.getItem('username') ?? '';
+/**
+ * Return the canonical user identifier (UUID) for API requests.
+ *
+ * Priority:
+ * 1. `user_info.user_id` — the UUID returned by the backend at login time.
+ *    This is the authoritative identifier used by both JWT (sub claim) and
+ *    the agentscope storage layer (Redis key namespace).
+ * 2. Fallback to `username` only when no JWT-based login has occurred
+ *    (dev-mode / backward compat).
+ */
+export const getUserId = (): string => {
+	// 1. Dedicated user_id key (set at login / OAuth callback / refresh)
+	const uid = localStorage.getItem('user_id');
+	if (uid) return uid;
+	// 2. Fallback: extract from user_info JSON
+	const raw = localStorage.getItem('user_info');
+	if (raw) {
+		try {
+			const info = JSON.parse(raw) as { user_id?: string };
+			if (info.user_id) return info.user_id;
+		} catch { /* fall through */ }
+	}
+	// 3. Last resort: username (dev-mode / backward compat)
+	return localStorage.getItem('username') ?? '';
+};
 
 // ── JWT token helpers ──────────────────────────────────────────────────────
 export const getAccessToken = () => localStorage.getItem('access_token') ?? '';
@@ -60,10 +84,11 @@ function buildHeaders(hasBody: boolean, skipAuth?: boolean): Record<string, stri
 	const token = getAccessToken();
 	if (token) {
 		headers['Authorization'] = `Bearer ${token}`;
-	}
-	const uid = getUserId();
-	if (uid) {
-		headers['X-User-ID'] = uid;
+	} else {
+		const uid = getUserId();
+		if (uid) {
+			headers['X-User-ID'] = uid;
+		}
 	}
 
 	if (hasBody) headers['Content-Type'] = 'application/json';

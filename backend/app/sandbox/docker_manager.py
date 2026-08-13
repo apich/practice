@@ -6,6 +6,7 @@ a workspace directory for the agent's tools to operate in.
 
 Requires the ``docker`` Python SDK and a running Docker Engine.
 """
+import asyncio
 import logging
 from typing import Optional
 
@@ -54,7 +55,6 @@ class DockerSandboxManager(SandboxManager):
             raise RuntimeError("Docker SDK is not installed")
 
         import docker
-        import asyncio
 
         client = docker.from_env()
 
@@ -111,7 +111,6 @@ class DockerSandboxManager(SandboxManager):
             return
 
         import docker
-        import asyncio
 
         client = docker.from_env()
         instance = self._instances[session_id]

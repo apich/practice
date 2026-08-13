@@ -10,30 +10,40 @@ Integrates AgentScope's create_app with platform-level extensions:
 import os
 
 import uvicorn
-from fastapi.middleware import Middleware
 from fastapi.middleware.cors import CORSMiddleware
 
 # ── Platform configuration ───────────────────────────────────────────────────
-from app.config import get_settings
+from app.core.config import get_settings
 
 # ── Platform extension modules ───────────────────────────────────────────────
-from app.auth.access_control import AccessControlMiddleware
-from app.auth.exceptions import register_exception_handlers
-from app.auth.middleware import AuthMiddleware
+from app.auth.middleware import AccessControlMiddleware, AuthMiddleware
 from app.auth.router import router as auth_router, create_default_admin
 from app.auth.security import close_security_service
 from app.auth.service import close_auth_service
-from app.db.engine import init_db, get_session_factory, create_tables, close_db
+from app.core.database import init_db, get_session_factory, create_tables, close_db
+from app.core.exceptions import register_exception_handlers
 from app.publish.router import router as publish_router, unpublish_router
 from app.sandbox.factory import create_sandbox_manager, get_sandbox_backend
+
+# ── Sandbox configuration ───────────────────────────────────────────
+# The sandbox manager is created at import time so it's available for
+# the startup/shutdown lifecycle. When SANDBOX_BACKEND=local (default),
+# this is None and LocalWorkspaceManager is used directly.
+sandbox_manager = create_sandbox_manager()
+if sandbox_manager:
+    print(f"[sandbox] Backend: {get_sandbox_backend()} — isolated execution enabled")
 
 from agentscope.app import create_app, SubAgentTemplate
 from agentscope.app.channel import DiscordChannel, FeishuChannel
 from agentscope.app.hub import ClawSkillHub, GitHubMCPHub
-# from agentscope.app.message_bus import InMemoryMessageBus
 from agentscope.app.message_bus import RedisMessageBus
 from agentscope.app.rag.knowledge_base_manager import CollectionPerKbManager
-from agentscope.app.storage import RedisStorage
+from agentscope.app.storage import AsyncSQLAlchemyStorage
+
+# Patch AsyncSQLAlchemyStorage with channel support before instantiation
+from app.storage_channel import patch_storage_with_channel_support
+patch_storage_with_channel_support()
+
 from agentscope.app.workspace_manager import LocalWorkspaceManager
 from agentscope.mcp import MCPClient, StdioMCPConfig, HttpMCPConfig
 from agentscope.middleware import AgenticMemoryMiddleware, MiddlewareBase
@@ -44,25 +54,20 @@ from agentscope.workspace import WorkspaceBase
 # ── Load centralized settings ────────────────────────────────────────────────
 settings = get_settings()
 
-# ── Platform database initialization ────────────────────────────────────────
-# Initialize DB at module level (not in on_event) because agentscope's
-# create_app uses its own lifespan handler, which may prevent on_event
-# callbacks from firing reliably.
-init_db(settings)
-
 
 # ── Wrap agentscope's lifespan to add platform DB initialization ───────────
 # agentscope's create_app sets its own lifespan handler, which prevents
 # @app.on_event("startup") from firing. We wrap the original lifespan to
 # inject our async initialization (create tables, seed admin).
 from contextlib import asynccontextmanager
-from agentscope.app._lifespan import lifespan as _agentscope_lifespan
+from agentscope.app._lifespan import lifespan as _agentscope_lifespan  # noqa: S101
 
 
 @asynccontextmanager
 async def _platform_lifespan(app):
     """Platform lifespan that wraps agentscope's lifespan."""
-    # Startup: create tables and seed default admin
+    # Startup: initialize platform DB, create tables, seed default admin
+    init_db(settings)
     await create_tables()
     session_factory = get_session_factory()
     async with session_factory() as db:
@@ -70,6 +75,12 @@ async def _platform_lifespan(app):
     # Enter agentscope's lifespan
     async with _agentscope_lifespan(app) as result:
         yield result
+    # Shutdown: clean up platform resources (after agentscope cleanup)
+    await close_security_service()
+    await close_auth_service()
+    if sandbox_manager:
+        await sandbox_manager.cleanup_all()
+    await close_db()
 
 
 default_mcps = [
@@ -95,13 +106,16 @@ if os.getenv("AMAP_API_KEY"):
         ),
     )
 
-storage = RedisStorage(
-    host="localhost",
-    port=6379,
-    db=10
+# AgentScope storage: use AsyncSQLAlchemyStorage with the same database
+# as the platform. The storage is an async context manager, and its
+# lifecycle is managed by agentscope's lifespan (AsyncExitStack).
+storage = AsyncSQLAlchemyStorage(
+    url=settings.effective_database_url,
+    create_tables=True,
+    auto_migrate=False,
 )
 
-vector_store = QdrantStore(location=":memory:")
+vector_store = QdrantStore(location=settings.qdrant_location)
 
 
 async def longterm_memory_factory(
@@ -112,37 +126,42 @@ async def longterm_memory_factory(
 ) -> list[MiddlewareBase]:
     """Attach Markdown-file long-term memory, stored under the session's
     workspace so it is reachable through whichever backend is bound."""
-    del user_id, agent_id, session_id
+    del user_id, agent_id
     return [
         AgenticMemoryMiddleware(
             workdir=workspace.workdir,
+            memory_dir=f"Memory/{session_id}",
             backend=workspace.get_backend(),
         ),
     ]
 
 
+# Build the workspace manager: when a sandbox backend is active,
+# wrap LocalWorkspaceManager with SandboxWorkspaceManager to integrate
+# sandbox lifecycle with workspace operations.
+_local_workspace_manager = LocalWorkspaceManager(
+    basedir=settings.effective_workspace_basedir,
+    default_mcps=default_mcps,
+)
+
+if sandbox_manager is not None:
+    from app.sandbox.workspace import SandboxWorkspaceManager
+    _workspace_manager = SandboxWorkspaceManager(
+        sandbox_manager=sandbox_manager,
+        delegate=_local_workspace_manager,
+    )
+else:
+    _workspace_manager = _local_workspace_manager
+
 app = create_app(
     storage=storage,
-    # message_bus=InMemoryMessageBus(),
-    # -- To use a Redis-backed message bus instead (recommended for
-    # -- multi-process / production deployments), uncomment the lines
-    # -- below and replace the InMemoryMessageBus() above:
-    #
-    # from agentscope.app.message_bus import RedisMessageBus
     message_bus=RedisMessageBus(
-        host="localhost",
-        port=6379,
+        host=settings.redis_host,
+        port=settings.redis_port,
+        db=settings.redis_db,
+        password=settings.redis_password or None,
     ),
-    workspace_manager=LocalWorkspaceManager(
-        basedir=settings.effective_workspace_basedir,
-        # The default MCP servers that will be added into the workspace
-        default_mcps=default_mcps,
-    ),
-    # NOTE: Sandbox mode (Docker/K8s) is configured via SANDBOX_BACKEND
-    # env var. When set to 'docker' or 'k8s', the sandbox manager is
-    # created and available for session-level isolation. Full integration
-    # (proxying file operations through the sandbox) is a TODO.
-    # See _sandbox/factory.py for configuration details.
+    workspace_manager=_workspace_manager,
     # Knowledge base feature — backed by an in-memory Qdrant store. The
     # CollectionPerKbManager allocates one collection per knowledge base,
     # so any embedding dimension is allowed.
@@ -207,6 +226,25 @@ so anything you want them to see MUST be sent through `TeamSay`.""",
 app.router.lifespan_context = _platform_lifespan
 
 
+# ── Override AgentScope's user ID dependency ──────────────────────────────────
+# AgentScope's endpoints use get_current_user_id to extract the user ID from
+# the X-User-ID header. We override it to extract from JWT (request.state.user)
+# first, falling back to X-User-ID for dev-mode compatibility.
+from fastapi import Request as FastAPIRequest
+from agentscope.app.deps import get_current_user_id as _default_get_user_id
+
+
+async def _platform_get_user_id(request: FastAPIRequest) -> str:
+    """Extract user ID from JWT (request.state.user) or X-User-ID header."""
+    user_payload = getattr(request.state, "user", None)
+    if user_payload:
+        return user_payload.get("sub", "")
+    return request.headers.get("X-User-ID", "")
+
+
+app.dependency_overrides[_default_get_user_id] = _platform_get_user_id
+
+
 # ── Register platform extensions on the agentscope app ─────────────────────
 app.include_router(auth_router)
 app.include_router(publish_router)
@@ -218,13 +256,29 @@ app.include_router(unpublish_router)
 # missing). For a liveness probe, authentication is unnecessary. We remove
 # the original route first, then register our own.
 from fastapi import Request as FastAPIRequest, Response as FastAPIResponse
-from agentscope.app._router._schema import HealthResponse, ComponentStatus
+from pydantic import BaseModel
+
+# Custom health response models (avoid importing from agentscope private modules)
+class ComponentStatus(str):
+    """Health status of a component."""
+    OK = "ok"
+    NOT_READY = "not_ready"
+    DISABLED = "disabled"
+
+
+class HealthResponse(BaseModel):
+    """Health check response."""
+    status: str
+    version: str
+    components: dict[str, str]
+
 
 # Remove the agentscope /health route (it depends on get_current_user_id).
-# agentscope wraps routers in _IncludedRouter objects, so we clear the
-# original health_router's routes list directly.
-from agentscope.app._router import health_router as _health_router
-_health_router.routes.clear()
+# Traverse app.routes to find and remove the health endpoint.
+for route in list(app.routes):
+    if hasattr(route, "path") and route.path == "/health":
+        app.routes.remove(route)
+        break
 
 _EAGER_COMPONENTS = ("storage", "message_bus", "workspace_manager")
 _LIFESPAN_COMPONENTS = (
@@ -272,8 +326,9 @@ async def platform_health(
 # ── Global exception handlers ────────────────────────────────────────────────
 register_exception_handlers(app)
 
-# Register AccessControl BEFORE Auth so Auth is the outermost layer
-# (Auth populates request.state.user, then AccessControl checks the role).
+# Starlette's add_middleware wraps in reverse: the LAST added is the
+# OUTERMOST layer. Auth is added last so it runs first on every request,
+# populating request.state.user before AccessControl checks the role.
 app.add_middleware(AccessControlMiddleware)
 app.add_middleware(AuthMiddleware)
 
@@ -288,25 +343,6 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["X-Session-Id", "X-User-Id"],
 )
-
-# ── Sandbox configuration ───────────────────────────────────────────────────
-# The sandbox manager is created at import time so it's available for
-# the startup/shutdown lifecycle. When SANDBOX_BACKEND=local (default),
-# this is None and LocalWorkspaceManager is used directly.
-sandbox_manager = create_sandbox_manager()
-if sandbox_manager:
-    print(f"[sandbox] Backend: {get_sandbox_backend()} — isolated execution enabled")
-
-
-@app.on_event("shutdown")
-async def _shutdown_cleanup() -> None:
-    """Clean up platform resources on shutdown."""
-    await close_security_service()
-    await close_auth_service()
-    if sandbox_manager:
-        await sandbox_manager.cleanup_all()
-    await close_db()
-
 
 if __name__ == "__main__":
     # Start the service

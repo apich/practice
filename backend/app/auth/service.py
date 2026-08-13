@@ -25,7 +25,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import Role, User
-from app.config import Settings, get_settings
+from app.auth.security import hash_password
+from app.core.config import Settings, get_settings
+from app.core.database import get_session_factory
 
 
 # 默认角色与权限
@@ -461,9 +463,6 @@ class AuthService:
         Raises:
             ValueError: 注册关闭或用户名已存在
         """
-        from app.auth.security import hash_password
-        from app.db.engine import get_session_factory
-
         if not self._settings.enable_register:
             raise ValueError("Registration is disabled")
 

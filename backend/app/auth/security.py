@@ -28,6 +28,9 @@ if TYPE_CHECKING:
 # Using bcrypt directly to avoid passlib compatibility issues with bcrypt >= 4.1
 import bcrypt as _bcrypt
 
+from app.core.exceptions import AuthenticationError
+from app.core.config import get_settings
+
 
 def hash_password(password: str) -> str:
     """Hash a plaintext password using bcrypt.
@@ -71,7 +74,6 @@ class PermissionInfo(BaseModel):
 
 
 def _get_settings() -> Settings:
-    from app.config import get_settings
     return get_settings()
 
 
@@ -193,7 +195,6 @@ class SecurityService:
         info = self._decode_jwt(token)
 
         if not info.active:
-            from app.auth.exceptions import AuthenticationError
             raise AuthenticationError("Token is invalid or expired")
 
         self._token_cache[cache_key] = info
@@ -213,7 +214,6 @@ class SecurityService:
         """
         parts = token.split(".")
         if len(parts) != 3:
-            from app.auth.exceptions import AuthenticationError
             raise AuthenticationError("Invalid token format")
 
         try:
@@ -262,7 +262,6 @@ class SecurityService:
                 issuer="agent-platform",
             )
         except jwt.PyJWTError as e:
-            from app.auth.exceptions import AuthenticationError
             raise AuthenticationError("Token is invalid or expired") from e
 
         perm_info = PermissionInfo(
@@ -296,7 +295,6 @@ async def get_security_service() -> SecurityService:
     """获取安全服务单例."""
     global _security_service
     if _security_service is None:
-        from app.config import get_settings
         _security_service = SecurityService(get_settings())
     return _security_service
 

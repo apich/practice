@@ -29,6 +29,13 @@ export interface MessagesResponse {
  */
 const freshlyCreated = new Set<string>();
 
+// Clean up on HMR to prevent state leakage across hot reloads
+if (import.meta.hot) {
+	import.meta.hot.dispose(() => {
+		freshlyCreated.clear();
+	});
+}
+
 /**
  * Whether `sessionId` was created by this tab and not yet opened.
  * Consumes the flag, so a second call for the same id returns false.

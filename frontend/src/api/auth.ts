@@ -1,4 +1,4 @@
-import { client, getAccessToken } from './client';
+import { client } from './client';
 import type { UserInfoResponse } from './types';
 
 export interface TokenResponse {
@@ -55,7 +55,9 @@ export const authApi = {
 				role: tokens.role,
 			}),
 		);
-		// Also set username for X-User-ID fallback / agentscope compatibility
+		// Persist user_id as the canonical identifier for X-User-ID header
+		localStorage.setItem('user_id', tokens.user_id);
+		// username kept only for display purposes
 		localStorage.setItem('username', tokens.username);
 
 		return tokens;
@@ -69,23 +71,14 @@ export const authApi = {
 		const refreshToken = localStorage.getItem('refresh_token');
 		if (!refreshToken) throw new Error('No refresh token');
 
-		const url = new URL('/auth/refresh', window.location.origin);
-		const res = await fetch(url.toString(), {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-				...(getAccessToken() && {
-					Authorization: `Bearer ${getAccessToken()}`,
-				}),
-			},
-			body: JSON.stringify({ refresh_token: refreshToken }),
-		});
+		const tokens = await client.post<TokenResponse>(
+			'/auth/refresh',
+			{ refresh_token: refreshToken },
+			undefined,
+			{ silent: true },
+		);
 
-		if (!res.ok) {
-			throw new Error('Token refresh failed');
-		}
-
-		const tokens = (await res.json()) as TokenResponse;
+		// Persist new tokens
 		localStorage.setItem('access_token', tokens.access_token);
 		localStorage.setItem('refresh_token', tokens.refresh_token);
 		localStorage.setItem(
@@ -96,6 +89,7 @@ export const authApi = {
 				role: tokens.role,
 			}),
 		);
+		localStorage.setItem('user_id', tokens.user_id);
 
 		return tokens;
 	},
@@ -125,6 +119,7 @@ export const authApi = {
 				role: tokens.role,
 			}),
 		);
+		localStorage.setItem('user_id', tokens.user_id);
 		localStorage.setItem('username', tokens.username);
 
 		return tokens;
@@ -142,6 +137,7 @@ export const authApi = {
 		localStorage.removeItem('access_token');
 		localStorage.removeItem('refresh_token');
 		localStorage.removeItem('user_info');
+		localStorage.removeItem('user_id');
 		localStorage.removeItem('username');
 	},
 

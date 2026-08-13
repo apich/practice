@@ -443,7 +443,6 @@ import type {
 	UserConfirmResultEvent,
 	ExternalExecutionResultEvent,
 } from '@agentscope-ai/agentscope/event';
-import type { Msg } from '@agentscope-ai/agentscope/message';
 
 export interface ChatRequest {
 	agent_id: string;

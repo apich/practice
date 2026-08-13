@@ -6,14 +6,21 @@ directly from route handlers.
 """
 import hashlib
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 from fastapi import HTTPException, status
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.publish.models import AgentPublication, AgentVersion
+from agentscope._utils._common import _generate_id
+from agentscope.app.storage import SessionConfig
+from agentscope.message import Msg
+
+from app.publish.models import AgentExecution, AgentPublication, AgentVersion
 
 # ── Version number generation ────────────────────────────────────────────────
 
@@ -47,6 +54,7 @@ async def _fetch_agent_snapshot(app: Any, agent_id: str, user_id: str) -> dict:
         )
 
     record = await storage.get_agent(user_id, agent_id)
+
     if record is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -61,6 +69,7 @@ async def _fetch_agent_snapshot(app: Any, agent_id: str, user_id: str) -> dict:
         "context_config": data.context_config.model_dump() if data.context_config else None,
         "react_config": data.react_config.model_dump() if data.react_config else None,
         "invite_config": data.invite_config.model_dump() if data.invite_config else None,
+        "owner_user_id": record.user_id,
     }
 
 
@@ -104,7 +113,7 @@ async def publish_agent(
     agent_name = agent_data.get("name", agent_id)
     agent_description = agent_data.get("system_prompt", "")[:500]
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     version = generate_version(agent_id, release_notes, now)
 
     # Snapshot the agent config for rollback
@@ -200,7 +209,7 @@ async def unpublish_agent(
         )
 
     publication.published = False
-    publication.unpublished_at = datetime.utcnow()
+    publication.unpublished_at = datetime.now(timezone.utc)
     await db.commit()
 
     return {"agent_id": agent_id, "published": False}
@@ -326,7 +335,7 @@ async def rollback_version(
     pub.current_version = target.version
     pub.execution_mode = target.execution_mode
     pub.input_schema = target.input_schema
-    pub.updated_at = datetime.utcnow()
+    pub.updated_at = datetime.now(timezone.utc)
 
     await db.commit()
 
@@ -340,21 +349,29 @@ async def rollback_version(
 # ── Task mode execution ──────────────────────────────────────────────────────
 
 def _format_task_parameters(params: dict) -> str:
-    """Format task parameters into a structured user message.
+    """Format task parameters into a natural-language user message.
 
     The parameters become the first user message sent to the agent,
     so the agent receives them as context without modifying its
-    system_prompt.
+    system_prompt.  The message is phrased as a normal user request
+    to avoid triggering model content-safety filters that may flag
+    overly mechanical / structured prompts.
     """
-    lines = ["以下是任务参数："]
+    if not params:
+        return "请执行任务。"
+
+    parts: list[str] = []
     for key, value in params.items():
+        label = key.replace("_", " ")
         if isinstance(value, (dict, list)):
-            lines.append(f"- {key}: {json.dumps(value, ensure_ascii=False)}")
-        else:
-            lines.append(f"- {key}: {value}")
-    lines.append("")
-    lines.append("请根据以上参数执行任务。")
-    return "\n".join(lines)
+            parts.append(f"{label}：{json.dumps(value, ensure_ascii=False)}")
+        elif value is not None and value != "":
+            parts.append(f"{label}：{value}")
+
+    if not parts:
+        return "请执行任务。"
+
+    return "请根据以下信息执行任务：\n" + "\n".join(parts)
 
 
 async def execute_task(
@@ -368,9 +385,10 @@ async def execute_task(
 
     Creates a new session and sends the formatted parameters as the
     first user message. Returns ``{session_id, agent_id}``.
-    """
-    from httpx import ASGITransport, AsyncClient
 
+    Uses direct service calls instead of HTTP self-calls to avoid
+    the overhead of serialising through the ASGI transport.
+    """
     # Verify the agent is published in task mode
     pub = await get_published(db, agent_id)
     if pub["execution_mode"] != "task":
@@ -379,44 +397,136 @@ async def execute_task(
             detail="This agent is not in task mode",
         )
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://internal",
-    ) as client:
-        headers = {"X-User-ID": user_id, "Content-Type": "application/json"}
+    # Resolve the agent's actual owner user_id from storage so that
+    # internal session/chat calls hit the correct Redis namespace.
+    agent_data = await _fetch_agent_snapshot(app, agent_id, user_id)
+    owner_user_id = agent_data.get("owner_user_id", user_id)
 
-        # 1 — Create a session
-        create_resp = await client.post(
-            "/sessions/",
-            json={"agent_id": agent_id},
-            headers=headers,
+    # Get services from app.state
+    storage = getattr(app.state, "storage", None)
+    workspace_manager = getattr(app.state, "workspace_manager", None)
+    chat_service = getattr(app.state, "chat_service", None)
+    chat_run_registry = getattr(app.state, "chat_run_registry", None)
+    if not all([storage, workspace_manager, chat_service, chat_run_registry]):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Required services not available",
         )
-        if create_resp.status_code != 200:
-            raise HTTPException(
-                status_code=create_resp.status_code,
-                detail=f"Failed to create session: {create_resp.text}",
-            )
-        session_id = create_resp.json().get("session_id")
 
-        # 2 — Send the formatted parameters as the first user message
-        message_text = _format_task_parameters(params)
-        chat_resp = await client.post(
-            "/chat/",
-            json={
-                "agent_id": agent_id,
-                "session_id": session_id,
-                "input": {
-                    "role": "user",
-                    "content": [{"type": "text", "text": message_text}],
-                },
-            },
-            headers=headers,
+    # 1 — Create a session directly via storage
+    workspace_id = workspace_manager.assign_workspace_id(
+        user_id=owner_user_id,
+        agent_id=agent_id,
+        session_id=_generate_id(),
+    )
+    session_record = await storage.upsert_session(
+        user_id=owner_user_id,
+        agent_id=agent_id,
+        config=SessionConfig(workspace_id=workspace_id),
+    )
+    session_id = session_record.id
+
+    # 2 — Send the formatted parameters as the first user message
+    message_text = _format_task_parameters(params)
+    logger.info(
+        "execute_task: agent=%s session=%s message=%r",
+        agent_id, session_id, message_text[:200],
+    )
+
+    user_msg = Msg(
+        name="user",
+        role="user",
+        content=[{"type": "text", "text": message_text}],
+    )
+
+    try:
+        chat_run_registry.spawn(
+            chat_service.run(
+                user_id=owner_user_id,
+                session_id=session_id,
+                agent_id=agent_id,
+                input_msg=user_msg,
+            ),
+            session_id=session_id,
         )
-        if chat_resp.status_code != 200:
-            raise HTTPException(
-                status_code=chat_resp.status_code,
-                detail=f"Failed to start chat: {chat_resp.text}",
-            )
+    except RuntimeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(e),
+        ) from e
+
+    # Record end-user execution for analytics / audit
+    execution = AgentExecution(
+        agent_id=agent_id,
+        user_id=user_id,
+        session_id=session_id,
+        execution_mode="task",
+        input_params=params,
+    )
+    db.add(execution)
+    await db.commit()
+
+    return {"session_id": session_id, "agent_id": agent_id}
+
+
+# ── Chat mode start ──────────────────────────────────────────────────────────
+
+async def start_chat(
+    db: AsyncSession,
+    app: Any,
+    agent_id: str,
+    user_id: str,
+) -> dict:
+    """Start a chat-mode session for a published agent.
+
+    Creates a new session and records the execution for audit / analytics.
+
+    Uses direct service calls instead of HTTP self-calls to avoid
+    the overhead of serialising through the ASGI transport.
+    """
+    # Verify the agent is published in chat mode
+    pub = await get_published(db, agent_id)
+    if pub["execution_mode"] != "chat":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="This agent is not in chat mode",
+        )
+
+    # Resolve the agent's actual owner user_id from storage
+    agent_data = await _fetch_agent_snapshot(app, agent_id, user_id)
+    owner_user_id = agent_data.get("owner_user_id", user_id)
+
+    # Get services from app.state
+    storage = getattr(app.state, "storage", None)
+    workspace_manager = getattr(app.state, "workspace_manager", None)
+    if not all([storage, workspace_manager]):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Required services not available",
+        )
+
+    # Create a session directly via storage
+    workspace_id = workspace_manager.assign_workspace_id(
+        user_id=owner_user_id,
+        agent_id=agent_id,
+        session_id=_generate_id(),
+    )
+    session_record = await storage.upsert_session(
+        user_id=owner_user_id,
+        agent_id=agent_id,
+        config=SessionConfig(workspace_id=workspace_id),
+    )
+    session_id = session_record.id
+
+    # Record end-user execution for analytics / audit
+    execution = AgentExecution(
+        agent_id=agent_id,
+        user_id=user_id,
+        session_id=session_id,
+        execution_mode="chat",
+    )
+    db.add(execution)
+    await db.commit()
 
     return {"session_id": session_id, "agent_id": agent_id}
 
