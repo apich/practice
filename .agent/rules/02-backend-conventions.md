@@ -5,11 +5,11 @@
 ### 🚫 禁止修改 AgentScope 源码
 - `agentscope` 通过 PyPI 安装，视为**不可变依赖**
 - 所有扩展功能必须通过**独立模块**实现
-- 模块命名使用下划线前缀（如 `_auth/`, `_publish/`, `_sandbox/`）表示平台扩展
+- 平台扩展模块位于 `backend/app/` 下，按领域分目录（`auth/`、`publish/`、`sandbox/`、`core/`），不以 `app.` 之外的前缀命名
 
 ### 扩展方式
 ```python
-# backend/main.py
+# backend/app/main.py
 from agentscope.app import create_app
 
 # 1. 创建基础应用
@@ -21,13 +21,14 @@ app = create_app(
 )
 
 # 2. 挂载扩展路由
-from _auth.router import auth_router
-from _publish.router import publish_router
+from app.auth.router import router as auth_router
+from app.publish.router import router as publish_router
 app.include_router(auth_router)
 app.include_router(publish_router)
 
-# 3. 添加中间件
-from _auth.middleware import AuthMiddleware
+# 3. 添加中间件（注册顺序见 main.py 注释：Auth 先于 AccessControl，CORS 最外层）
+from app.auth.middleware import AccessControlMiddleware, AuthMiddleware
+app.add_middleware(AccessControlMiddleware)
 app.add_middleware(AuthMiddleware)
 ```
 
@@ -48,8 +49,8 @@ from agentscope.app import create_app
 from agentscope.model import DashScopeChatModel
 
 # 4. 本地模块
-from _auth.models import User
-from _publish.service import PublishService
+from app.auth.models import User
+from app.publish.service import PublishService
 ```
 
 ### 文档字符串
@@ -97,7 +98,7 @@ uv add package-name
 uv sync
 
 # 运行脚本
-uv run python backend/main.py
+uv run python -m app.main
 ```
 
 ### pyproject.toml 结构
@@ -109,16 +110,23 @@ requires-python = ">=3.11"  # AgentScope 2.0 强制要求
 
 dependencies = [
     "agentscope[service]>=2.0.6",
-    "passlib[bcrypt]",
-    "uvicorn",
+    "agentscope[storage-redis]>=2.0.6",
+    "agentscope[vdb-qdrant]>=2.0.6",
+    "agentscope[channel]>=2.0.6",
+    "PyJWT>=2.8.0",
+    "bcrypt",
+    "SQLAlchemy[asyncio]>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "httpx>=0.27.0",
 ]
 
-[tool.uv]
-dev-dependencies = [
-    "pytest",
-    "pytest-asyncio",
-]
+[project.optional-dependencies]
+dev = ["pre-commit", "pytest", "pytest-asyncio"]
+sandbox-docker = ["docker>=7.0.0"]
+sandbox-k8s = ["kubernetes>=29.0.0"]
 ```
+
+> 注意：密码哈希直接使用 `bcrypt` 库（`app/auth/security.py`），不使用 `passlib`，以避免其与 bcrypt>=4.1 的兼容问题。依赖声明中也没有 `passlib[bcrypt]`。
 
 ## 数据模型设计
 
@@ -398,14 +406,30 @@ app.add_middleware(
 
 ### 扩展模块结构
 ```
-backend/_auth/
-├── __init__.py
-├── models.py          # 数据模型（SQLAlchemy）
-├── schemas.py         # API 模式（Pydantic）
-├── service.py         # 业务逻辑
-├── router.py          # FastAPI 路由
-├── middleware.py      # 中间件
-└── dependencies.py    # 依赖注入
+backend/app/
+├── main.py            # 应用入口（集成 agentscope.create_app + 平台扩展）
+├── core/              # 核心基础设施
+│   ├── config.py      # 集中式配置 (pydantic-settings)
+│   ├── database.py    # SQLAlchemy 异步引擎、Base、get_db、create_tables
+│   └── exceptions.py  # 全局异常处理器
+├── auth/              # 认证与授权
+│   ├── models.py      # User ORM 模型、Role 常量、Pydantic schema
+│   ├── security.py    # JWT 工具、bcrypt、SecurityService
+│   ├── service.py     # AuthService（本地密码 + OAuth2.0 委托 + PKCE）
+│   ├── middleware.py  # AuthMiddleware + AccessControlMiddleware
+│   ├── deps.py        # AuthContext、get_current_user、require_role
+│   └── router.py      # /auth/* FastAPI 路由
+├── publish/           # 智能体发布与版本管理
+│   ├── models.py      # AgentPublication / AgentVersion / AgentExecution
+│   ├── service.py     # 发布业务逻辑（版本号、快照、回滚、任务执行）
+│   └── router.py      # /publish/*、/unpublish/* 路由
+└── sandbox/           # Docker / K8s 沙盒管理器
+    ├── base.py        # 沙盒抽象基类
+    ├── docker_manager.py
+    ├── k8s_manager.py
+    ├── factory.py     # 沙盒工厂
+    ├── workspace.py   # SandboxWorkspaceManager
+    └── Dockerfile     # 沙盒镜像
 ```
 
 ### 职责分离

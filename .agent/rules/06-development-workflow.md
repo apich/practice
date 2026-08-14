@@ -11,16 +11,17 @@ cd backend
 uv sync
 
 # 启动开发服务器（热重载）
-uv run python main.py
+uv run python -m app.main
 
 # 或直接使用 uvicorn
-uv run uvicorn main:app --host 0.0.0.0 --port 9000 --reload
+uv run uvicorn app.main:app --host 0.0.0.0 --port 9000 --reload
 ```
 
 **前置条件:**
 - Python 3.11+ 已安装
 - Redis 运行在 `localhost:6379`
 - Qdrant 可选（默认使用内存模式）
+- 首次启动自动创建默认管理员账号 `admin/admin`（developer 角色）
 
 ### 前端启动
 ```bash
@@ -37,18 +38,21 @@ pnpm dev
 ```
 
 **Vite 代理配置:**
-前端开发服务器自动代理 `/api` 请求到 `http://localhost:9000`。
+前端开发服务器自动代理后端前缀（`/auth`、`/agent`、`/publish`、`/sessions`、`/chat` 等）到 `http://localhost:9000`。
 
-### 首次设置流程
+### 首次使用流程
 1. 访问 `http://localhost:5173`
-2. 自动跳转到 `/setup` 页面
-3. 配置服务器地址（默认 `http://localhost:9000`）
-4. 输入用户名
-5. 点击"完成设置"
+2. 未认证时自动跳转 `/login` 登录页
+3. 使用默认账号 `admin/admin` 登录（developer 角色）
+4. 登录成功后按角色重定向：
+   - `developer` → `/admin/chat`
+   - `end_user` → `/space`
 
-配置存储在 localStorage：
-- `server_url` - 后端地址
-- `username` - 用户标识
+认证状态存于 localStorage：
+- `access_token` - JWT 访问令牌
+- `refresh_token` - JWT 刷新令牌
+- `user_info` - 用户信息
+- `user_id` - 规范化用户标识
 
 ## 代码风格和规范
 
@@ -97,16 +101,29 @@ pnpm build
 
 ### 后端模块结构
 ```
-backend/
-├── main.py              # 入口文件（调用 agentscope.create_app）
-├── _auth/               # 扩展模块示例（计划中）
-│   ├── __init__.py
-│   ├── models.py       # 数据模型
-│   ├── schemas.py      # API Schema
-│   ├── service.py      # 业务逻辑
-│   ├── router.py       # FastAPI 路由
-│   └── dependencies.py # 依赖注入
-└── pyproject.toml      # 依赖配置
+backend/app/
+├── main.py              # 入口文件（调用 agentscope.create_app + 平台扩展）
+├── core/                # 核心基础设施
+│   ├── config.py       # 集中式配置 (pydantic-settings)
+│   ├── database.py    # SQLAlchemy 异步引擎、Base、会话管理
+│   └── exceptions.py  # 全局异常处理器
+├── auth/                # 认证与授权
+│   ├── models.py       # User ORM 模型、Role 常量
+│   ├── service.py      # AuthService（本地密码 + OAuth2.0 委托）
+│   ├── security.py     # JWT 工具、bcrypt、SecurityService
+│   ├── middleware.py   # AuthMiddleware + AccessControlMiddleware
+│   ├── deps.py         # AuthContext、get_current_user、require_role
+│   └── router.py       # /auth/* 路由
+├── publish/             # 智能体发布与版本管理
+│   ├── models.py       # AgentPublication / AgentVersion / AgentExecution
+│   ├── service.py      # 发布业务逻辑
+│   └── router.py       # /publish/*、/unpublish/* 路由
+└── sandbox/             # Docker / K8s 沙盒
+    ├── base.py
+    ├── docker_manager.py
+    ├── k8s_manager.py
+    ├── factory.py
+    └── workspace.py
 ```
 
 ### 前端组件结构
@@ -177,22 +194,21 @@ uv run pytest --cov=backend
 
 **测试结构:**
 ```python
-# tests/test_agent.py
+# tests/test_auth.py
 import pytest
 from httpx import AsyncClient
-from main import app
+from app.main import app
 
 @pytest.mark.asyncio
-async def test_create_agent():
+async def test_login():
     async with AsyncClient(app=app, base_url="http://test") as client:
         response = await client.post(
-            "/agent/",
-            json={"name": "Test Agent"},
-            headers={"X-User-ID": "test-user"},
+            "/auth/login",
+            json={"username": "admin", "password": "admin"},
         )
         assert response.status_code == 200
         data = response.json()
-        assert "agent_id" in data
+        assert "access_token" in data
 ```
 
 ### 前端测试
@@ -340,15 +356,18 @@ pnpm install
 **错误:** `Access-Control-Allow-Origin header is missing`
 
 **解决:**
-确认 `backend/main.py` 中 CORS 配置：
+CORS 配置在 `backend/app/main.py` 中，来源于 `.env` 的 `CORS_ORIGINS`（逗号分隔）：
 ```python
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 开发环境
+    allow_origins=settings.cors_origins_list,  # 来自 .env 的 CORS_ORIGINS
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Session-Id", "X-User-Id"],
 )
 ```
+确认 `CORS_ORIGINS` 包含前端来源（开发环境默认 `http://localhost:5173`）。
 
 ## 性能优化
 
@@ -435,13 +454,25 @@ const virtualizer = useVirtualizer({
 ## 部署准备
 
 ### 环境变量
-创建 `.env` 文件：
+创建 `.env` 文件（完整模板见 `backend/.env.example`）：
 ```bash
 # 后端
 REDIS_HOST=localhost
 REDIS_PORT=6379
+REDIS_DB=10
 CLAWHUB_API_TOKEN=your_token_here
 AMAP_API_KEY=your_key_here
+
+# 数据库（默认 SQLite，生产切换 PostgreSQL）
+DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/agent_platform
+
+# JWT（生产环境务必修改 secret）
+JWT_SECRET_KEY=your-strong-secret
+SEED_ADMIN_USERNAME=admin
+SEED_ADMIN_PASSWORD=change-me
+
+# 沙盒（local | docker | k8s）
+SANDBOX_BACKEND=local
 
 # 生产环境
 CORS_ORIGINS=https://yourdomain.com
@@ -461,7 +492,7 @@ pnpm build
 cd backend
 
 # 使用 gunicorn + uvicorn workers
-uv run gunicorn main:app \
+uv run gunicorn app.main:app \
   --workers 4 \
   --worker-class uvicorn.workers.UvicornWorker \
   --bind 0.0.0.0:9000
@@ -487,7 +518,7 @@ API 文档自动生成（FastAPI）：
 
 **后端:**
 ```python
-# backend/_mymodule/router.py
+# backend/app/mymodule/router.py
 from fastapi import APIRouter
 
 router = APIRouter(prefix="/mymodule", tags=["mymodule"])
@@ -496,8 +527,8 @@ router = APIRouter(prefix="/mymodule", tags=["mymodule"])
 async def list_items():
     return {"items": []}
 
-# backend/main.py
-from _mymodule.router import router as mymodule_router
+# backend/app/main.py
+from app.mymodule.router import router as mymodule_router
 app.include_router(mymodule_router)
 ```
 
@@ -514,6 +545,8 @@ export const mymoduleApi = {
 const { items } = await mymoduleApi.list();
 ```
 
+> 新增的 API 前缀需同步添加 `frontend/vite.config.ts` 的 proxy 配置。
+
 ### 添加新的页面
 
 ```typescript
@@ -524,13 +557,17 @@ export function MyPage() {
 
 // src/App.tsx
 import { MyPage } from '@/pages/mypage';
+import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 
 const router = createBrowserRouter([
   {
-    element: <AppLayout />,
+    // Admin 空间页面需包在 ProtectedRoute + AppLayout 内
+    element: <ProtectedRoute roles={['developer']} />,
     children: [
-      { path: '/mypage', element: <MyPage /> },
-      // ...
+      {
+        element: <AppLayout />,
+        children: [{ path: '/admin/mypage', element: <MyPage /> }],
+      },
     ],
   },
 ]);

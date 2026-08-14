@@ -54,13 +54,13 @@ ChatViewport 是整个聊天交互的核心组件，负责：
 
 **已知面板类型:**
 ```typescript
-type PanelKey = 
-  | 'plan'        // 任务规划（已废弃？）
+type PanelKey =
   | 'mcp'         // MCP 工具管理
   | 'skill'       // Skill 管理
   | 'permission'  // 权限请求处理
   | 'knowledge'   // 知识库查询
-  | 'team';       // 团队成员管理
+  | 'team'        // 团队成员管理
+  | 'task';       // 任务管理
 ```
 
 ## 核心交互流程
@@ -76,7 +76,7 @@ const { session_id } = await sessionApi.create({
 });
 
 // 2. 导航到聊天页
-navigate(`/chat/${agentId}/${session_id}`);
+navigate(`/admin/chat/${agentId}/${session_id}`);
 
 // 3. 订阅 SSE 事件流
 const eventStream = sessionApi.streamEvents(session_id, agent_id, abortSignal);
@@ -232,8 +232,11 @@ export function useAgent(agentId: string) {
 ### 本地状态持久化
 
 **localStorage 键:**
-- `server_url` - 后端服务器地址
-- `username` - 用户标识
+- `access_token` - JWT 访问令牌
+- `refresh_token` - JWT 刷新令牌
+- `user_info` - 登录用户信息 JSON（`{ user_id, username, role }`）
+- `user_id` - 规范化用户标识（UUID，优先于 username）
+- `username` - 用户名字符串（仅展示用途）
 - `chat_panel_layout` - 聊天面板布局
 - `i18nextLng` - 语言偏好（i18next 自动管理）
 
@@ -389,19 +392,29 @@ SSE 流包含心跳帧（comment 格式 `:...\n`），前端自动忽略。
 
 ### 路由结构
 ```typescript
-/                              → Navigate to /chat
-/chat/:agentId?/:sessionId?    → 聊天页
-/schedule                      → 调度管理
-/channel                       → 渠道管理
-/credential                    → 凭证管理
-/mcp                           → MCP Hub 浏览
-/mcp/:hubId                    → 指定 Hub
-/skill                         → Skill Hub 浏览
-/skill/:hubId                  → 指定 Hub
-/knowledge                     → 知识库管理
-/knowledge/:kbId               → 知识库详情
-/setup                         → 初始化设置（首次访问）
+/login                           → 登录页（公开）
+/admin                           → Navigate to /admin/chat
+/admin/chat/:agentId?/:sessionId?/:memberId? → Admin 聊天页（仅 developer）
+/admin/schedule                  → 调度管理
+/admin/channel                   → 渠道管理
+/admin/credential                → 凭证管理
+/admin/mcp                       → MCP Hub 浏览
+/admin/mcp/:hubId                → 指定 Hub
+/admin/skill                     → Skill Hub 浏览
+/admin/skill/:hubId              → 指定 Hub
+/admin/knowledge                 → 知识库管理
+/admin/knowledge/:kbId           → 知识库详情
+/profile                         → 用户资料
+/space                           → 终端用户市场（已发布 Agent 列表）
+/space/launchpad/:agentId        → 启动确认页（对话确认 / 任务表单）
+/space/chat/:agentId/:sessionId? → 用户聊天页
+/space/task/:agentId/:sessionId? → 任务结果页
 ```
+
+**角色守卫:**
+- `/admin/*` 与 `/` 使用 `ProtectedRoute roles={['developer']}`
+- `/space/*` 使用 `ProtectedRoute roles={['end_user', 'developer']}`
+- 角色不匹配时重定向到角色主页（developer → `/admin/chat`，end_user → `/space`）
 
 ### 导航模式
 
@@ -412,10 +425,13 @@ import { useNavigate } from 'react-router-dom';
 const navigate = useNavigate();
 
 // 导航到会话
-navigate(`/chat/${agentId}/${sessionId}`);
+navigate(`/admin/chat/${agentId}/${sessionId}`);
+
+// Space 空间导航
+navigate(`/space/launchpad/${agentId}`);
 
 // 替换历史
-navigate('/chat', { replace: true });
+navigate('/admin/chat', { replace: true });
 
 // 返回
 navigate(-1);
@@ -445,7 +461,7 @@ const router = createBrowserRouter([
       {
         errorElement: <RouteError />,  // 内容区错误边界
         children: [
-          { path: '/chat/:agentId?/:sessionId?', element: <ChatPage /> },
+          { path: '/admin/chat/:agentId?/:sessionId?', element: <ChatPage /> },
           // ...
         ],
       },

@@ -18,40 +18,67 @@
 ```
 src/
 ├── api/                    # API 客户端层
-│   ├── client.ts          # HTTP 客户端封装
-│   ├── health.ts          # 健康检查 API
+│   ├── client.ts          # HTTP 客户端封装 (JWT + X-User-ID 回退)
+│   ├── auth.ts            # 认证 API
+│   ├── publish.ts         # 发布管理 API
+│   ├── types.ts           # 共享类型定义
+│   ├── agent.ts           # Agent API
+│   ├── session.ts         # 会话 API
+│   ├── chat.ts            # 聊天 API
+│   ├── mcp.ts             # MCP API
 │   ├── skill.ts           # Skill API
+│   ├── hub.ts             # Hub API
+│   ├── knowledgeBase.ts   # 知识库 API
+│   ├── schedule.ts        # 调度 API
+│   ├── channel.ts         # 渠道 API
+│   ├── credential.ts      # 凭证 API
+│   ├── workspace.ts       # 工作空间 API
+│   ├── model.ts           # 模型 API
+│   ├── health.ts          # 健康检查 API
 │   └── index.ts           # 导出所有 API
 ├── components/
+│   ├── auth/              # AuthProvider, ProtectedRoute, RoleGuard
 │   ├── ui/                # shadcn/ui 组件（不修改）
+│   ├── form/              # SchemaForm 动态表单
+│   ├── chat/              # 聊天组件
+│   ├── layout/            # AppLayout, AppSidebar, SidebarInset
 │   ├── badge/             # 徽章组件
-│   ├── error/             # 错误组件
+│   ├── dialog/            # 对话框组件
+│   ├── drawer/            # 抽屉组件
+│   ├── error/             # 错误组件 (RouteError)
 │   ├── hub/               # Hub 相关组件
-│   ├── layout/            # 布局组件
+│   ├── knowledge/         # 知识库相关组件
+│   ├── markdown/          # Markdown 渲染组件
+│   ├── panel/             # 面板组件 (PanelDock)
+│   ├── popover/           # 弹出组件
 │   ├── select/            # 选择器组件
-│   └── tour/              # 引导组件
+│   └── tour/              # 引导组件 (Onborda)
 ├── context/               # React Context
 │   └── UploadContext.tsx
-├── hooks/                 # 自定义 Hooks
+├── hooks/                 # 自定义 Hooks (useAuth, useChat, useMessages, ...)
 ├── i18n/                  # 国际化
 │   ├── index.ts
 │   ├── useI18n.ts
-│   ├── locales/
-│   │   ├── en.json
-│   │   └── zh.json
+│   └── locales/
+│       ├── en.json
+│       └── zh.json
 ├── lib/                   # 工具库
 │   └── utils.ts
+├── types/                 # 类型定义
 ├── pages/                 # 页面组件
+│   ├── login/             # 登录页
+│   ├── chat/              # Admin 聊天页面
+│   ├── space/             # 终端用户空间 (market, launchpad, chat, task)
 │   ├── channel/           # 渠道管理
-│   ├── chat/              # 聊天页面
 │   ├── credential/        # 凭证管理
 │   ├── knowledge/         # 知识库管理
 │   ├── mcp/               # MCP Hub
+│   ├── profile/           # 用户资料
 │   ├── schedule/          # 调度管理
 │   ├── setup/             # 初始化设置
 │   └── skill/             # Skill Hub
 ├── utils/                 # 工具函数
-├── App.tsx                # 应用入口
+├── App.tsx                # 应用入口与路由定义
 ├── main.tsx               # React 渲染入口
 └── index.css              # 全局样式
 ```
@@ -388,16 +415,33 @@ const result = await client.get('/api/agents', undefined, { silent: true });
 ```typescript
 // App.tsx
 import { createBrowserRouter, RouterProvider } from 'react-router-dom';
+import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 
 const router = createBrowserRouter([
+  { path: '/login', element: <LoginPage /> },
   {
-    element: <AppLayout />,
-    errorElement: <RouteError />,
+    // Admin 空间：仅 developer
+    element: <ProtectedRoute roles={['developer']} />,
     children: [
-      { path: '/', element: <Navigate to="/chat" replace /> },
-      { path: '/chat/:agentId?/:sessionId?', element: <ChatPage /> },
-      { path: '/schedule', element: <SchedulePage /> },
-      // ...
+      {
+        element: <AppLayout />,
+        children: [
+          { path: '/admin', element: <Navigate to="/admin/chat" replace /> },
+          { path: '/admin/chat/:agentId?/:sessionId?', element: <ChatPage /> },
+          { path: '/admin/schedule', element: <SchedulePage /> },
+          // ...
+        ],
+      },
+    ],
+  },
+  {
+    // Space 空间：end_user + developer
+    element: <ProtectedRoute roles={['end_user', 'developer']} />,
+    children: [
+      { path: '/space', element: <SpacePage /> },
+      { path: '/space/launchpad/:agentId', element: <LaunchpadPage /> },
+      { path: '/space/chat/:agentId/:sessionId?', element: <SpaceChatPage /> },
+      { path: '/space/task/:agentId/:sessionId?', element: <TaskResultPage /> },
     ],
   },
 ]);
@@ -417,8 +461,8 @@ function Component() {
   const [searchParams] = useSearchParams();
   
   // 编程式导航
-  navigate('/chat/agent-123');
-  navigate('/chat', { replace: true });
+  navigate('/admin/chat/agent-123');
+  navigate('/admin/chat', { replace: true });
   navigate(-1); // 返回
   
   // 查询参数
@@ -457,11 +501,11 @@ export default i18n;
 
 ### 使用翻译
 ```typescript
-import { useTranslation } from 'react-i18next';
+import { useTranslation } from '@/i18n/useI18n';
 
 function Component() {
   const { t, i18n } = useTranslation();
-  
+
   return (
     <div>
       <h1>{t('welcome')}</h1>
@@ -472,6 +516,8 @@ function Component() {
   );
 }
 ```
+
+> 项目中翻译 Hook 统一从 `@/i18n/useI18n` 导入（内部基于 react-i18next 封装），不要直接依赖 `react-i18next` 包。
 
 ### 翻译文件
 ```json

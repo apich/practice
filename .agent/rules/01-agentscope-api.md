@@ -207,6 +207,7 @@ async def longterm_memory_factory(
     return [
         AgenticMemoryMiddleware(
             workdir=workspace.workdir,
+            memory_dir=f"Memory/{session_id}",
             backend=workspace.get_backend(),
         ),
     ]
@@ -218,7 +219,7 @@ app = create_app(
 )
 ```
 
-记忆存储为 Markdown 文件，位于 workspace 目录下。
+记忆存储为 Markdown 文件，位于 workspace 目录下的 `Memory/{session_id}` 中。
 
 ## 权限系统
 
@@ -273,7 +274,22 @@ message_bus = InMemoryMessageBus()
 
 ## 存储后端
 
-### Redis 存储
+### 关系数据库存储（本项目使用）
+本项目使用 `AsyncSQLAlchemyStorage`，与平台数据库（SQLite/PostgreSQL）共用：
+```python
+from agentscope.app.storage import AsyncSQLAlchemyStorage
+
+storage = AsyncSQLAlchemyStorage(
+    url="sqlite+aiosqlite:///path/to/agent_platform.db",
+    create_tables=True,
+    auto_migrate=False,
+)
+
+# 通过 create_app 传入
+app = create_app(storage=storage, ...)
+```
+
+### Redis 存储（备选）
 ```python
 from agentscope.app.storage import RedisStorage
 
@@ -283,6 +299,8 @@ storage = RedisStorage(
     db=10,
 )
 ```
+
+> 注意：本项目平台数据（用户、发布记录等）存放在独立的 SQLAlchemy 表中（`app/core/database.py` 的 `Base`），AgentScope 自身数据（Agent、Session、消息）存放在 `AsyncSQLAlchemyStorage` 中，两者共用同一个 `effective_database_url`。
 
 ## Hub 系统
 

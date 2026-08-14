@@ -3,19 +3,20 @@
 ## API 基础架构
 
 ### 后端端点前缀
-所有 API 端点使用 `/api/` 前缀路由到后端（通过 Vite 代理配置）。
+API 端点不使用统一 `/api/` 前缀——各资源前缀直接代理到后端（见 `frontend/vite.config.ts` 中的 proxy 配置）。
 
 ### 身份验证
-**当前实现（简化模式）:**
-- 通过 `X-User-ID` header 传递用户标识
-- 用户标识存储在 `localStorage.getItem('username')`
-- 无密码验证、无 token 机制
-- 服务器 URL 存储在 `localStorage.getItem('server_url')`
+**当前实现（JWT + 双角色）:**
+- 登录成功后签发 `access_token`（短时，默认 30 分钟）+ `refresh_token`（长时，默认 7 天）
+- 所有请求自动携带 `Authorization: Bearer <token>` header
+- Token 存于 localStorage：`access_token`、`refresh_token`、`user_info`、`user_id`
+- 401 时自动清除 token 并跳转 `/login`
+- **开发模式回退**：无 token 时使用 `X-User-ID` header（`localStorage.getItem('user_id')` 或 `username`），与 Setup 页兼容
 
-**计划扩展（Plan.md）:**
-- OAuth2 + JWT
-- Bearer token 认证
-- 双角色模型（开发者/终端用户）
+**角色访问控制:**
+- `AccessControlMiddleware` 拦截 `end_user` 角色访问开发者专用前缀（`/agent`、`/credential`、`/mcp`、`/skill`、`/knowledge*`、`/schedule`、`/channel`、`/hub`、`/model`、`/publish/my`、`/publish/agent`、`/unpublish`、`/auth/register` 等）→ 403
+- 公开路径（`/health`、`/docs`、`/redoc`、`/openapi.json`、`/auth/token`、`/auth/refresh`）不受角色检查限制（见 `app/auth/middleware.py` 的 `PUBLIC_PATHS`）
+- 路由级使用 `require_role(Role.DEVELOPER)` 依赖做细粒度控制
 
 ### 错误处理
 ```typescript
@@ -31,6 +32,153 @@ status = 0            // 网络错误（无法连接到服务器）
 ```
 
 自动 toast 提示错误，除非设置 `{ silent: true }`。
+
+## 平台扩展 API
+
+### Auth API (`/auth/`)
+
+**端点列表:**
+- `POST /auth/login` - JSON 登录（username + password），返回 tokens
+- `GET /auth/oauth/login` - 生成 OAuth2.0 授权 URL（Authorization Code + PKCE）
+- `POST /auth/callback` - OAuth2.0 回调（code → 本地 JWT）
+- `GET /auth/me` - 获取当前用户信息（需认证）
+- `POST /auth/refresh` - 刷新 access token
+- `POST /auth/logout` - 注销（协调点，客户端清空本地 token）
+- `POST /auth/register` - 注册新用户（仅 developer 角色）
+
+**数据结构:**
+```typescript
+interface TokenResponse {
+  access_token: string;
+  refresh_token: string;
+  token_type: 'bearer';
+  user_id: string;
+  username: string;
+  role: 'developer' | 'end_user';
+}
+
+interface UserInfoResponse {
+  user_id: string;
+  username: string;
+  role: string;
+  created_at: string | null;
+}
+
+interface LoginUrlResponse {
+  login_url: string;   // 跳转 OAuth 授权页
+  state: string;       // CSRF 防护
+  redirect_uri: string;
+}
+```
+
+**登录流程:**
+```
+POST /auth/login (username, password)
+  ├─ 已配置 OAUTH_AUTH_SERVER_URL?  →  委托外部鉴权服务 (grant_type=password)
+  │     ├─ 获取 userinfo → 同步/创建本地用户
+  │     └─ 签发本地 JWT
+  └─ 否则 / 回退  →  本地 bcrypt 校验 users 表
+        └─ 签发本地 JWT
+```
+
+**JWT 结构:**
+```json
+{
+  "sub": "user_id",
+  "username": "xxx",
+  "role": "developer",
+  "roles": ["developer"],
+  "permissions": ["agent:chat", "..."],
+  "type": "access" | "refresh",
+  "iss": "agent-platform",
+  "iat": 1234567890,
+  "exp": 1234567890
+}
+```
+
+### Publish API (`/publish/`, `/unpublish/`)
+
+**端点列表:**
+- `POST /publish/agent/{agent_id}` - 发布/更新 Agent（开发者；body 含 release_notes、execution_mode、input_schema）
+- `POST /unpublish/agent/{agent_id}` - 取消发布（开发者）
+- `GET /publish/list` - 所有已发布 Agent（终端用户可见）
+- `GET /publish/my` - 当前开发者发布的 Agent
+- `GET /publish/{agent_id}` - 单个已发布 Agent 详情（含 input_schema）
+- `GET /publish/{agent_id}/versions` - 版本历史
+- `GET /publish/{agent_id}/versions/{version}` - 指定版本详情（含 agent_snapshot）
+- `POST /publish/{agent_id}/rollback/{version}` - 回滚到指定版本（开发者）
+- `POST /publish/{agent_id}/execute` - 任务模式执行（body: `{ input: params }`）
+- `POST /publish/{agent_id}/chat` - 对话模式启动（创建 session）
+
+**数据结构:**
+```typescript
+interface PublishRequest {
+  release_notes: string;                    // 必填
+  execution_mode: 'chat' | 'task';
+  input_schema?: JSONSchema | null;         // task 模式必填
+}
+
+interface PublishResponse {
+  version: string;          // 7 位短 SHA256 哈希，如 "a3f2c8d"
+  agent_id: string;
+  published_at: string;
+}
+
+interface PublishedAgentDetail {
+  id: string;
+  agent_id: string;
+  agent_name: string;
+  agent_description: string;
+  published: boolean;
+  current_version: string;
+  execution_mode: 'chat' | 'task';
+  input_schema: JSONSchema | null;
+  published_at: string | null;
+  unpublished_at: string | null;
+  published_by: string;
+}
+
+interface AgentVersion {
+  id: string;
+  version: string;
+  release_notes: string;
+  execution_mode: 'chat' | 'task';
+  published_by: string;
+  published_at: string;
+  is_current: boolean;
+}
+
+interface AgentVersionDetail extends AgentVersion {
+  input_schema: JSONSchema | null;
+  agent_snapshot: Record<string, unknown>;
+}
+
+interface ExecuteResponse {
+  session_id: string;
+  agent_id: string;
+}
+```
+
+**实现要点:**
+- 版本号由后端生成（`agent_id + release_notes + timestamp` 的 SHA256 前 7 位）
+- 发布时保存 Agent 配置快照（`agent_snapshot`）用于回滚
+- 任务模式执行：创建 session + 将表单参数格式化为首条用户消息注入（不修改 system_prompt）
+- 对话模式启动：创建 session 并记录执行审计（`agent_executions` 表）
+
+### Health API (`/health`)
+
+**端点:**
+- `GET /health` - 健康检查（无认证要求）
+
+```typescript
+interface HealthResponse {
+  status: 'ok' | 'not_ready';
+  version: string;
+  components: Record<string, 'ok' | 'not_ready' | 'disabled'>;
+}
+```
+
+组件检查包括：`storage`、`message_bus`、`workspace_manager`、`chat_service`、`session_service`、`scheduler_manager` 等；`mcp_hubs`/`skill_hubs` 未配置时为 `disabled`。
 
 ## 核心 API 模块
 
@@ -447,19 +595,6 @@ interface GitStatus {
 - `GET /model/?provider={provider}` - 获取聊天模型列表
 - `GET /embedding-model/?provider={provider}` - 获取 Embedding 模型列表
 - `GET /tts-model/?provider={provider}` - 获取 TTS 模型列表
-
-### Health API (`/health`)
-
-**端点:**
-- `GET /health` - 健康检查
-
-```typescript
-interface HealthResponse {
-  status: 'ok' | 'not_ready';
-  version: string;
-  components: Record<string, 'ok' | 'not_ready' | 'disabled'>;
-}
-```
 
 ## 通用约定
 
