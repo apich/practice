@@ -205,3 +205,83 @@ def require_role(*allowed_roles: str):
         return user
 
     return _checker
+
+
+def _read_permissions_from_cookies(request: Request) -> list[str]:
+    """从 Cookie 中读取用户权限集合（gzip 压缩 + base64 编码 + 分片存储）."""
+    import base64
+    import gzip
+    import json
+
+    count_str = request.cookies.get("user_permissions_count", "0")
+    try:
+        count = int(count_str)
+    except ValueError:
+        return []
+
+    if count <= 0:
+        return []
+
+    chunks = []
+    for i in range(count):
+        chunk = request.cookies.get(f"user_permissions_{i}", "")
+        if not chunk:
+            return []
+        chunks.append(chunk)
+
+    try:
+        encoded = "".join(chunks)
+        compressed = base64.b64decode(encoded)
+        data = gzip.decompress(compressed)
+        return json.loads(data)
+    except Exception:
+        return []
+
+
+def require_permissions(
+    permissions: list[str],
+    logic: str = "OR",
+):
+    """权限验证依赖工厂，支持 AND/OR 逻辑.
+
+    从 Cookie 中读取用户权限集合，验证是否满足接口要求的权限。
+
+    Args:
+        permissions: 所需权限码列表，如 ["agent:publish", "agent:config:create"]
+        logic: 多权限逻辑，"OR"（满足其一）或 "AND"（全部满足）
+
+    Usage::
+
+        @router.post("/agent/publish", dependencies=[Depends(require_permissions(["agent:publish"]))])
+        async def publish_agent(): ...
+
+        # AND 逻辑：必须同时拥有两个权限
+        @router.post("/agent/config", dependencies=[Depends(require_permissions(["agent:create", "agent:update"], logic="AND"))])
+        async def create_config(): ...
+    """
+
+    async def _checker(request: Request) -> None:
+        user_permissions = _read_permissions_from_cookies(request)
+        if not user_permissions:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="No permissions found. Please login first.",
+            )
+
+        user_perm_set = set(user_permissions)
+
+        if logic == "AND":
+            missing = set(permissions) - user_perm_set
+            if missing:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Missing required permissions: {', '.join(missing)}",
+                )
+        else:  # OR
+            if not (user_perm_set & set(permissions)):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Requires at least one of: {', '.join(permissions)}",
+                )
+
+    return _checker

@@ -77,8 +77,15 @@ class Settings(BaseSettings):
     oauth_token_path: str = "/oauth2/token"  # noqa: S105
     # OAuth2.0 userinfo 端点 URL（完整 URL，可选）
     oauth_userinfo_url: str = ""
+    # OAuth2.0 权限端点 URL（完整 URL，可选）
+    oauth_permissions_url: str = ""
     # Token / 权限缓存 TTL（秒）
     oauth_token_cache_ttl: int = 300
+    # 统一认证系统角色 ID → 本地角色映射（逗号分隔多个 ID）
+    # 匹配逻辑：用户 roleMap 中的 key 与这些 ID 比对，命中则分配对应角色
+    # 未命中任何映射的用户默认分配 end_user
+    role_developer_ids: str = ""  # e.g. "1,25,301"
+    role_end_user_ids: str = ""   # e.g. "8"
 
     # ===== AgentScope / 模型 =====
     model_api_key: str = ""

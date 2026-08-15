@@ -9,7 +9,7 @@
 		"lint": "eslint .",
 		"lint:fix": "eslint . --fix",
 		"preview": "vite preview"
-	},
+	},	
 	"dependencies": {
 		"@agentscope-ai/agentscope": "^0.0.15",
 		"@fontsource-variable/geist": "^5.2.8",

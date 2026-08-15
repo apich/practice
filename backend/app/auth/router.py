@@ -20,7 +20,8 @@ Login flow:
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -132,11 +133,11 @@ async def oauth_callback(
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login")
 async def login(
     body: LoginRequest,
     db: AsyncSession = Depends(get_db),
-) -> TokenResponse:
+):
     """JSON login: authenticate with username + password and return tokens.
 
     When OAUTH_AUTH_SERVER_URL is configured, delegates to external auth
@@ -155,7 +156,33 @@ async def login(
                 body.username, body.password, db,
             )
             if result:
-                return TokenResponse(**result)
+                # 提取权限数据并写入 Cookie（分片存储）
+                permissions = result.pop("permissions", [])
+                resp = JSONResponse(content=result)
+                if permissions:
+                    import gzip, base64, json
+                    compressed = gzip.compress(json.dumps(permissions).encode())
+                    encoded = base64.b64encode(compressed).decode()
+                    chunk_size = 3800
+                    chunks = [encoded[i:i+chunk_size] for i in range(0, len(encoded), chunk_size)]
+                    for idx, chunk in enumerate(chunks):
+                        resp.set_cookie(
+                            key=f"user_permissions_{idx}",
+                            value=chunk,
+                            httponly=True,
+                            secure=settings.is_production,
+                            samesite="strict",
+                            max_age=settings.jwt_access_expire_minutes * 60,
+                        )
+                    resp.set_cookie(
+                        key="user_permissions_count",
+                        value=str(len(chunks)),
+                        httponly=True,
+                        secure=settings.is_production,
+                        samesite="strict",
+                        max_age=settings.jwt_access_expire_minutes * 60,
+                    )
+                return resp
         except ValueError as e:
             # If the error is "用户名或密码错误", don't fall back — the
             # external auth server explicitly rejected the credentials.
@@ -188,13 +215,41 @@ async def login(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    return TokenResponse(
-        access_token=create_access_token(user.user_id, user.username, user.role),
-        refresh_token=create_refresh_token(user.user_id, user.username, user.role),
-        user_id=user.user_id,
-        username=user.username,
-        role=user.role,
+    token_data = {
+        "access_token": create_access_token(user.user_id, user.username, user.role),
+        "refresh_token": create_refresh_token(user.user_id, user.username, user.role),
+        "user_id": user.user_id,
+        "username": user.username,
+        "role": user.role,
+    }
+    # 本地登录：写入模拟权限 Cookie（用于测试 Cookie 功能）
+    mock_permissions = [
+        "user:create", "user:view", "user:update", "user:delete",
+        "role:create", "role:view", "role:update", "role:delete",
+        "knowledge:save", "knowledge:update", "knowledge:delete",
+        "agent:chat", "agent:config:create", "agent:config:update",
+    ]
+    import gzip, base64, json
+    compressed = gzip.compress(json.dumps(mock_permissions).encode())
+    encoded = base64.b64encode(compressed).decode()
+    resp = JSONResponse(content=token_data)
+    resp.set_cookie(
+        key="user_permissions_0",
+        value=encoded,
+        httponly=True,
+        secure=False,
+        samesite="strict",
+        max_age=settings.jwt_access_expire_minutes * 60,
     )
+    resp.set_cookie(
+        key="user_permissions_count",
+        value="1",
+        httponly=True,
+        secure=False,
+        samesite="strict",
+        max_age=settings.jwt_access_expire_minutes * 60,
+    )
+    return resp
 
 
 @router.get("/me", response_model=UserInfoResponse)

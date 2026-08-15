@@ -77,6 +77,31 @@ class AuthService:
 
     # ===== JWT 签发 =====
 
+    def _resolve_oauth_role(self, info: dict[str, Any]) -> str:
+        """根据统一认证系统的 roleMap 决定本地角色.
+
+        匹配逻辑：取用户 roleMap 的所有 key，与 .env 中配置的
+        role_developer_ids / role_end_user_ids 比对。
+        优先判断 developer，未命中任何映射默认 end_user。
+        """
+        settings = self._settings
+        role_map = info.get("roleMap", {})
+        user_role_ids = set(role_map.keys()) if role_map else set()
+
+        developer_ids = {
+            s.strip() for s in settings.role_developer_ids.split(",") if s.strip()
+        }
+        end_user_ids = {
+            s.strip() for s in settings.role_end_user_ids.split(",") if s.strip()
+        }
+
+        if developer_ids and user_role_ids & developer_ids:
+            return Role.DEVELOPER
+        if end_user_ids and user_role_ids & end_user_ids:
+            return Role.END_USER
+        # 未配置映射或未命中，默认 end_user
+        return Role.END_USER
+
     def _generate_jwt_token(self, user: User) -> dict[str, Any]:
         """为用户签发本地 JWT Token（access + refresh）.
 
@@ -217,6 +242,33 @@ class AuthService:
         except httpx.RequestError as e:
             raise ValueError("Unable to reach auth server") from e
 
+    async def _fetch_oauth_permissions(
+        self,
+        access_token: str,
+    ) -> list[str]:
+        """用 OAuth access_token 请求鉴权系统的 /permissions 端点.
+
+        Returns:
+            权限标识符列表，如 ["user:create", "role:update", ...]
+        """
+        permissions_url = self._settings.oauth_permissions_url
+        if not permissions_url:
+            return []
+
+        client = await self._get_http_client()
+        try:
+            response = await client.get(
+                permissions_url,
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            response.raise_for_status()
+            result = response.json()
+            if isinstance(result.get("data"), list):
+                return result["data"]
+            return []
+        except (httpx.HTTPStatusError, httpx.RequestError):
+            return []
+
     async def _sync_oauth_user(
         self,
         oauth_info: dict[str, Any],
@@ -268,12 +320,16 @@ class AuthService:
         user = result.scalar_one_or_none()
 
         if user is not None:
-            # 已存在，更新基本信息
+            # 已存在，同步基本信息和角色
             user.email = email
             user.name = name
+            user.role = self._resolve_oauth_role(info)
             await db.commit()
             await db.refresh(user)
             return user
+
+        # 根据统一认证系统的角色决定本地角色
+        role = self._resolve_oauth_role(info)
 
         # 检查 username 是否被常规登录用户占用
         stmt_username = select(User).where(User.username == username)
@@ -285,7 +341,7 @@ class AuthService:
         user = User(
             username=username,
             password_hash="",
-            role=Role.DEVELOPER,
+            role=role,
             auth_type="oauth",
             oauth_user_id=oauth_user_id,
             oauth_provider=oauth_provider,
@@ -328,8 +384,13 @@ class AuthService:
         # 3. 同步用户到本地
         user = await self._sync_oauth_user(oauth_user_info, db)
 
-        # 4. 签发本地 JWT
-        return self._generate_jwt_token(user)
+        # 4. 获取用户权限集合
+        permissions = await self._fetch_oauth_permissions(oauth_token["access_token"])
+
+        # 5. 签发本地 JWT，附带权限数据
+        token_data = self._generate_jwt_token(user)
+        token_data["permissions"] = permissions
+        return token_data
 
     # ===== OAuth2.0 Authorization Code + PKCE =====
 
