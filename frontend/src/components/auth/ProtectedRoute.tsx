@@ -24,31 +24,31 @@ interface Props {
  * </Route>
  * ```
  */
-export function ProtectedRoute({
-	children,
-	roles,
-	redirectTo = '/login',
-	roleMismatchRedirect,
-}: Props) {
-	const { user, loading, isAuthenticated } = useAuth();
-	const location = useLocation();
+	export function ProtectedRoute({
+		children,
+		roles,
+		redirectTo = '/login',
+		roleMismatchRedirect,
+	}: Props) {
+		const { user, loading, isAuthenticated } = useAuth();
+		const location = useLocation();
 
-	if (loading) {
-		// Still checking auth state — show nothing to avoid flash
-		return null;
+		if (loading) {
+			// Still checking auth state — show nothing to avoid flash
+			return null;
+		}
+
+		if (!isAuthenticated || !user) {
+			return <Navigate to={redirectTo} state={{ from: location }} replace />;
+		}
+
+		if (roles && !roles.includes(user.role)) {
+			// Role mismatch — redirect to role-appropriate home
+			const fallback =
+				roleMismatchRedirect ??
+				(user.role === 'developer' ? '/admin/chat' : '/space');
+			return <Navigate to={fallback} replace />;
+		}
+
+		return <>{children ?? <Outlet />}</>;
 	}
-
-	if (!isAuthenticated || !user) {
-		return <Navigate to={redirectTo} state={{ from: location }} replace />;
-	}
-
-	if (roles && !roles.includes(user.role)) {
-		// Role mismatch — redirect to role-appropriate home
-		const fallback =
-			roleMismatchRedirect ??
-			(user.role === 'developer' ? '/admin/chat' : '/space');
-		return <Navigate to={fallback} replace />;
-	}
-
-	return <>{children ?? <Outlet />}</>;
-}

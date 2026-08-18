@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
+import functools
 from typing import Optional, TYPE_CHECKING
 
 from fastapi import Depends, HTTPException, Request, status
@@ -125,6 +126,8 @@ async def get_current_user(
 
     Raises 401 if neither is available.
     """
+    from app.core.config.py import get_settings
+    settings = get_setting()
     # 1 — JWT path
     user_payload: Optional[dict] = getattr(request.state, "user", None)
     if user_payload:
@@ -143,6 +146,13 @@ async def get_current_user(
         )
 
     # 2 — X-User-ID fallback (dev mode / backward compatibility)
+    if settings.is_production: # 生产模式则禁止X-User-ID回退机制
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="no authenticated",
+            headers={"WWWAuthenticate":"Bearer"}
+        )
+        
     x_user_id = request.headers.get("X-User-ID", "")
     if x_user_id:
         result = await db.execute(
@@ -285,3 +295,67 @@ def require_permissions(
                 )
 
     return _checker
+
+
+def check_permissions(
+    permissions: list[str],
+    logic: str = "OR",
+):
+    """权限验证装饰器，支持 AND/OR 逻辑.
+
+    从 Cookie 中读取用户权限集合，验证是否满足接口要求的权限。
+    与 require_permissions（依赖工厂）功能相同，但使用装饰器语法。
+
+    Args:
+        permissions: 所需权限码列表，如 ["agent:publish", "agent:config:create"]
+        logic: 多权限逻辑，"OR"（满足其一）或 "AND"（全部满足）
+
+    Usage::
+
+        @router.post("/agent/publish")
+        @check_permissions(["agent:publish"])
+        async def publish_agent(request: Request): ...
+
+        # AND 逻辑：必须同时拥有两个权限
+        @router.post("/agent/config")
+        @check_permissions(["agent:create", "agent:update"], logic="AND")
+        async def create_config(request: Request): ...
+    """
+    def decorator(func):
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            # 从参数中提取 Request 对象（FastAPI 会自动注入）
+            request: Request | None = kwargs.get("request") or next(
+                (a for a in args if isinstance(a, Request)), None,
+            )
+            if request is None:
+                raise RuntimeError(
+                    "check_permissions 装饰器要求被装饰的函数必须包含 request: Request 参数",
+                )
+
+            user_permissions = _read_permissions_from_cookies(request)
+            if not user_permissions:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="No permissions found. Please login first.",
+                )
+
+            user_perm_set = set(user_permissions)
+
+            if logic == "AND":
+                missing = set(permissions) - user_perm_set
+                if missing:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail=f"Missing required permissions: {', '.join(missing)}",
+                    )
+            else:  # OR
+                if not (user_perm_set & set(permissions)):
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail=f"Requires at least one of: {', '.join(permissions)}",
+                    )
+
+            return await func(*args, **kwargs)
+        return wrapper
+    return decorator

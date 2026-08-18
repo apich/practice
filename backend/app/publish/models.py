@@ -46,7 +46,7 @@ class AgentPublication(Base):
     published_by: Mapped[str] = mapped_column(String(36))
     execution_mode: Mapped[str] = mapped_column(
         String(10), default="chat",
-    )  # "chat" | "task"
+    )  # "chat" | "task"    
     input_schema: Mapped[Optional[dict]] = mapped_column(
         JSON, nullable=True,
     )  # JSON Schema for task mode
