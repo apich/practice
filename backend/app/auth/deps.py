@@ -126,8 +126,8 @@ async def get_current_user(
 
     Raises 401 if neither is available.
     """
-    from app.core.config.py import get_settings
-    settings = get_setting()
+    from app.core.config import get_settings
+    settings = get_settings()
     # 1 — JWT path
     user_payload: Optional[dict] = getattr(request.state, "user", None)
     if user_payload:
