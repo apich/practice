@@ -239,6 +239,11 @@ async def _platform_get_user_id(request: FastAPIRequest) -> str:
     user_payload = getattr(request.state, "user", None)
     if user_payload:
         return user_payload.get("sub", "")
+    if settings.is_production:
+        raise HTTPException(status_code=401, 
+                            detail="Authentication required",
+                            headers={"WWW-Authenticate": "Bearer"}
+                            )
     return request.headers.get("X-User-ID", "")
 
 
@@ -255,7 +260,7 @@ app.include_router(unpublish_router)
 # The agentscope health endpoint requires X-User-ID header (returns 422 if
 # missing). For a liveness probe, authentication is unnecessary. We remove
 # the original route first, then register our own.
-from fastapi import Request as FastAPIRequest, Response as FastAPIResponse
+from fastapi import Request as FastAPIRequest, Response as FastAPIResponse, HTTPException
 from pydantic import BaseModel
 
 # Custom health response models (avoid importing from agentscope private modules)
