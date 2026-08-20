@@ -1,6 +1,6 @@
 # _fetch_agent_snapshot 函数讲解
 
-**文件：** [service.py:43-73](../../backend/app/publish/service.py#L43-L73)
+**文件：** [service.py:43-73](../../../backend/app/publish/service.py#L43-L73)
 
 ```python
 async def _fetch_agent_snapshot(app: Any, agent_id: str, user_id: str) -> dict:

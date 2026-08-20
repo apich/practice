@@ -150,6 +150,7 @@ async def login(
 
     # ── Try OAuth2.0 password grant delegation first ──
     if settings.is_oauth_enabled:
+        print("启用OAuth2.0认证")
         auth_service = get_auth_service()
         try:
             result = await auth_service.login_with_oauth_password(
@@ -202,7 +203,7 @@ async def login(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Password login is disabled",
         )
-
+    print("触发查询本地数据库用户")
     result = await db.execute(
         select(User).where(User.username == body.username),
     )
