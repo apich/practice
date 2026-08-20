@@ -109,7 +109,7 @@ class AuthService:
             包含 access_token / refresh_token / user 信息的字典
         """
         now = int(time.time())
-        access_expire = self._settings.jwt_access_expire_minutes
+        access_expire = 1  # TODO: 测试用，正式环境改回 self._settings.jwt_access_expire_minutes
         refresh_expire = self._settings.jwt_refresh_expire_days * 24 * 60  # 分钟
 
         access_payload = {

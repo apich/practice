@@ -1,5 +1,5 @@
 import { CircleAlert, Loader2 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 
 import { Alert, AlertDescription } from '@/components/ui/alert.tsx';
@@ -31,6 +31,14 @@ export function LoginPage() {
 	const [loading, setLoading] = useState(false);
 	const [errorMsg, setErrorMsg] = useState('');
 
+	// 读取跳转时存储的提示信息
+	// useEffect(() => {
+	// 	const msg = sessionStorage.getItem('auth_redirect_message');
+	// 	if (msg){
+	// 		setErrorMsg(msg);
+	// 		sessionStorage.removeItem("auth_redirect_message")
+	// 	}
+	// })
 	const handleSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
 		setLoading(true);

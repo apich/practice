@@ -244,7 +244,15 @@ async def _platform_get_user_id(request: FastAPIRequest) -> str:
                             detail="Authentication required",
                             headers={"WWW-Authenticate": "Bearer"}
                             )
-    return request.headers.get("X-User-ID", "")
+    x_user_id = request.headers.get("X-User-ID", "")
+    if not x_user_id:
+        raise HTTPException(status_code=401, 
+                            detail="Authentication required",
+                            headers={"WWW-Authenticate": "Bearer"}
+                            )
+        print("userid为空")
+    print(f"x_user_id不为空：{x_user_id}")
+    return x_user_id
 
 
 app.dependency_overrides[_default_get_user_id] = _platform_get_user_id

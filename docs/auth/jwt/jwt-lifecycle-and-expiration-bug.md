@@ -1,5 +1,17 @@
 # JWT 生命周期与过期导致 user_id 为空的 Bug 分析
 
+## 目录
+
+- [1. JWT 怎么来的](#1-jwt-怎么来的)
+- [2. 怎么确定 JWT 过期了](#2-怎么确定-jwt-过期了)
+- [3. 重新登录会复用旧 JWT 吗](#3-重新登录会复用旧-jwt-吗)
+- [4. Bug 触发场景复现](#4-bug-触发场景复现)
+- [5. 过期后 decode_token 返回 None 的处理链路](#5-过期后-decode_token-返回-none-的处理链路)
+- [6. 后端 raise 401 如何触发前端跳转登录页](#6-后端-raise-401-如何触发前端跳转登录页)
+- [7. 如果1分钟内就触发了 Bug](#7-如果1分钟内就触发了-bug)
+
+---
+
 ## 1. JWT 怎么来的
 
 当用户通过 OAuth 登录时，完整流程如下：
@@ -26,7 +38,7 @@ _generate_jwt_token(user)    ← 签发本地 JWT
 
 ### 签发代码
 
-`backend/app/auth/service.py:105-157`：
+[backend/app/auth/service.py:105-157](../../backend/app/auth/service.py#L105-L157)：
 
 ```python
 def _generate_jwt_token(self, user: User) -> dict:
@@ -44,7 +56,7 @@ def _generate_jwt_token(self, user: User) -> dict:
 
 ### 前端存储
 
-`frontend/src/api/auth.ts:39-64`：
+[frontend/src/api/auth.ts:39-64](../../frontend/src/api/auth.ts#L39-L64)：
 
 ```typescript
 login: async (username, password) => {
@@ -61,7 +73,7 @@ login: async (username, password) => {
 
 JWT 里内嵌了 `exp`（过期时间戳），验证时**直接本地检查，不需要网络请求**：
 
-`backend/app/auth/security.py:126-140`：
+[backend/app/auth/security.py:126-140](../../backend/app/auth/security.py#L126-L140)：
 
 ```python
 def decode_token(token: str) -> Optional[dict]:
@@ -144,7 +156,7 @@ T+30min  JWT 过期 → decode_token() 返回 None → request.state.user = None
 
 ### 根本原因
 
-`backend/app/main.py:237-248` 中 `_platform_get_user_id` 的覆盖逻辑：
+[backend/app/main.py:237-248](../../backend/app/main.py#L237-L248) 中 `_platform_get_user_id` 的覆盖逻辑：
 
 ```python
 async def _platform_get_user_id(request: FastAPIRequest) -> str:
@@ -175,7 +187,7 @@ async def get_current_user_id(x_user_id: str = Header(...)) -> str:
 
 JWT 过期后，`decode_token` 返回 `None`，之后的处理流程如下：
 
-### Step 1 — AuthMiddleware（middleware.py:79-117）
+### Step 1 — AuthMiddleware（[middleware.py:79-117](../../backend/app/auth/middleware.py#L79-L117)）
 
 ```python
 async def dispatch(self, request: Request, call_next):
@@ -195,7 +207,7 @@ async def dispatch(self, request: Request, call_next):
 
 **关键点：中间件不会返回 401，请求继续往下走。**
 
-### Step 2 — 路由依赖注入（main.py:237-248）
+### Step 2 — 路由依赖注入（[main.py:237-248](../../backend/app/main.py#L237-L248)）
 
 ```python
 async def _platform_get_user_id(request: FastAPIRequest) -> str:
@@ -228,7 +240,91 @@ JWT 过期
 
 中间件和路由依赖**都不拦截**，直接把空字符串当作合法的 `user_id` 写入了数据库。
 
-## 6. 如果1分钟内就触发了 Bug
+### user_payload 有效时 sub 一定存在
+
+`user_payload` 有值意味着以下两个条件都满足：
+
+1. `decode_token(token)` 成功返回（签名有效 + 未过期）
+2. `payload.get("type") == "access"`（是 access token）
+
+而这个 payload 一定是 `_generate_jwt_token` 生成的，签发时 `sub` 是必填字段：
+
+```python
+# service.py:115-126
+access_payload = {
+    "sub": user.user_id,    # ← 必填，来自数据库 UUID，不可能为空
+    "username": user.username,
+    "role": user.role,
+    "roles": [user.role],
+    "permissions": DEFAULT_PERMISSIONS,
+    "auth_type": getattr(user, "auth_type", "password"),
+    "iat": now,
+    "exp": now + access_expire * 60,
+    "iss": "agent-platform",
+    "type": "access",
+}
+```
+
+`user.user_id` 是数据库自动生成的 UUID（`default=lambda: str(uuid.uuid4())`），不可能为空。
+
+所以：**`user_payload` 有值 → `sub` 一定存在且非空 → `return user_payload.get("sub", "")` 一定能拿到有效的 user_id。**
+
+## 6. 后端 raise 401 如何触发前端跳转登录页
+
+当后端 `raise HTTPException(status_code=401)` 时，前端会自动清除登录态并跳转到登录页。
+
+### 完整链路
+
+**后端抛出 401：**
+
+```python
+raise HTTPException(status_code=401, detail="Authentication required", ...)
+```
+
+**前端 `client.ts` 捕获**（[client.ts:158-170](../../frontend/src/api/client.ts#L158-L170)）：
+
+```typescript
+if (!res.ok) {
+    const detail = await extractErrorDetail(res);
+    const error = new ApiError(res.status, detail);
+
+    // 401 → 清除登录状态 + 跳转 /login
+    if (res.status === 401 && !path.startsWith('/auth/')) {
+        clearAuthAndRedirect();   // ← 这里触发
+    }
+
+    if (!silent) toast.error(detail);  // ← 弹出错误提示
+    throw error;
+}
+```
+
+**`clearAuthAndRedirect` 执行**（[client.ts:34-41](../../frontend/src/api/client.ts#L34-L41)）：
+
+```typescript
+export function clearAuthAndRedirect() {
+    localStorage.removeItem('access_token');   // 清除 JWT
+    localStorage.removeItem('refresh_token');  // 清除 refresh token
+    localStorage.removeItem('user_info');      // 清除用户信息
+    localStorage.removeItem('user_id');
+    localStorage.removeItem('username');
+    if (window.location.pathname !== '/login') {
+        window.location.href = '/login';       // 跳转登录页
+    }
+}
+```
+
+### 总结
+
+```
+后端 raise 401
+  → 前端收到 HTTP 401 响应
+  → clearAuthAndRedirect()
+  → 清除 localStorage 全部登录态（access_token / refresh_token / user_info / user_id / username）
+  → window.location.href = '/login'
+  → 用户需要重新登录
+```
+
+## 7. 如果1分钟内就触发了 Bug
 
 如果从登录到创建智能体不超过 1 分钟，JWT 不应该过期（有效期 30 分钟）。
 此时问题可能是 **JWT 根本没被存储到 localStorage**。

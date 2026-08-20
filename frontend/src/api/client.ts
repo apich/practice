@@ -31,12 +31,22 @@ export const getAccessToken = () => localStorage.getItem('access_token') ?? '';
 export const isAuthenticated = () => !!localStorage.getItem('access_token');
 
 /** Clear all auth state and redirect to /login (if not already there). */
-export function clearAuthAndRedirect() {
+export function clearAuthAndRedirect(message? : string) {
 	localStorage.removeItem('access_token');
 	localStorage.removeItem('refresh_token');
 	localStorage.removeItem('user_info');
+	// if (message){
+	// 	sessionStorage.setItem("auth_redirect_message", message);
+	// }
+	const msg = message || '登录过期，请重新登录';
 	if (window.location.pathname !== '/login') {
-		window.location.href = '/login';
+			toast.error(msg, {position:'top-center'}); // 先弹出提示
+			setTimeout(()=>{
+				window.location.href = '/login';
+			},
+			5000
+		)// 5s后跳转
+		// window.location.href = '/login';
 	}
 }
 
@@ -162,10 +172,13 @@ async function streamRequest(path: string, options: RequestOptions = {}): Promis
 		// 401 → token expired or invalid. Clear auth state and redirect to login.
 		// Skip for /auth/ endpoints (login/refresh) so the caller can handle it.
 		if (res.status === 401 && !path.startsWith('/auth/')) {
-			clearAuthAndRedirect();
+			clearAuthAndRedirect("登录已过期，请重新登录");
+			throw new ApiError(401, '');  // 抛空错误，调用方 catch 后显示空字符串，不会弹窗
+		}else if(!silent){
+			toast.error(detail);
 		}
 
-		if (!silent) toast.error(detail);
+		// if (!silent) toast.error(detail);
 		throw error;
 	}
 
